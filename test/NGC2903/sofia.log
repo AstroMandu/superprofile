@@ -1,0 +1,229 @@
+[36m____________________________________________________________________________[0;1m
+
+ Pipeline started
+[0;36m____________________________________________________________________________[0m
+
+  Using:    Source Finding Application (SoFiA)
+  Version:  2.5.1 (16-Mar-2023)
+  CPU:      20 threads available
+  Time:     Tue Apr  8 15:28:34 2025
+
+[36m____________________________________________________________________________[0;1m
+
+ Loading parameter settings
+[0;36m____________________________________________________________________________[0m
+
+  Activating SoFiA default parameter settings.
+  Loading user-specified parameters.
+  - Loading user parameter file: /home/mandu/workspace/research/data/THINGS_halfbeam/NGC2903/sofia_nat.par
+  Using 1 out of 20 available CPU threads.
+
+[36m____________________________________________________________________________[0;1m
+
+ Loading data cube
+[0;36m____________________________________________________________________________[0m
+
+  Opening FITS file '/home/mandu/workspace/research/data/THINGS_halfbeam/NGC2903/cube.fits'.
+  Reading FITS data with the following specifications:
+    Data type:    -32
+    No. of axes:  3
+    Axis sizes:   201, 201, 87
+    Region:       0-200, 0-200, 0-86
+    Memory used:  13.4 MB
+  Searching for values of infinity.
+    No infinite pixel values found.
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Measuring global noise level
+[0;36m____________________________________________________________________________[0m
+
+  Global RMS:  4.343e-04  (using stride of 3)
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Running S+C finder
+[0;36m____________________________________________________________________________[0m
+
+  Using the following parameters:
+  - Kernels
+    - spatial:        0, 4.0, 6.0
+    - spectral:       0, 3, 11, 23
+  - Flux threshold:   3.5 * rms
+  - Noise statistic:  median absolute deviation
+  - Flux range:       negative
+
+  Using a stride of 3 in noise measurement.
+
+  Smoothing kernel:  [0.0] x [0]
+  Noise level:       4.343e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [0.0] x [3]
+  Noise level:       3.139e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [0.0] x [11]
+  Noise level:       2.247e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [0.0] x [23]
+  Noise level:       1.902e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [4.0] x [0]
+  Noise level:       2.172e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [4.0] x [3]
+  Noise level:       1.703e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [4.0] x [11]
+  Noise level:       1.357e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [4.0] x [23]
+  Noise level:       1.181e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [6.0] x [0]
+  Noise level:       1.802e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [6.0] x [3]
+  Noise level:       1.466e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [6.0] x [11]
+  Noise level:       1.223e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+  Smoothing kernel:  [6.0] x [23]
+  Noise level:       1.069e-04
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Creating source mask cube
+[0;36m____________________________________________________________________________[0m
+
+  170578 pixels detected by source finder (4.853%).
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Running Linker
+[0;36m____________________________________________________________________________[0m
+
+  Linker settings:
+   - Merging radii:   1, 1, 1
+   - Minimum size:    2 x 2 x 1
+   - Keep negative:   no
+
+  Progress:  |[33m                                                  [0m| 1%  Progress:  |[33m=                                                 [0m| 2%  Progress:  |[33m=                                                 [0m| 3%  Progress:  |[33m==                                                [0m| 4%  Progress:  |[33m==                                                [0m| 5%  Progress:  |[33m===                                               [0m| 6%  Progress:  |[33m====                                              [0m| 8%  Progress:  |[33m====                                              [0m| 9%  Progress:  |[33m=====                                             [0m| 10%  Progress:  |[33m=====                                             [0m| 11%  Progress:  |[33m======                                            [0m| 12%  Progress:  |[33m======                                            [0m| 13%  Progress:  |[33m=======                                           [0m| 14%  Progress:  |[33m========                                          [0m| 16%  Progress:  |[33m========                                          [0m| 17%  Progress:  |[33m=========                                         [0m| 18%  Progress:  |[33m=========                                         [0m| 19%  Progress:  |[33m==========                                        [0m| 20%  Progress:  |[33m==========                                        [0m| 21%  Progress:  |[33m===========                                       [0m| 22%  Progress:  |[33m============                                      [0m| 24%  Progress:  |[33m============                                      [0m| 25%  Progress:  |[33m=============                                     [0m| 26%  Progress:  |[33m=============                                     [0m| 27%  Progress:  |[33m==============                                    [0m| 28%  Progress:  |[33m==============                                    [0m| 29%  Progress:  |[33m===============                                   [0m| 31%  Progress:  |[33m================                                  [0m| 32%  Progress:  |[33m================                                  [0m| 33%  Progress:  |[33m=================                                 [0m| 34%  Progress:  |[33m=================                                 [0m| 35%  Progress:  |[33m==================                                [0m| 36%  Progress:  |[33m==================                                [0m| 37%  Progress:  |[33m===================                               [0m| 39%  Progress:  |[33m====================                              [0m| 40%  Progress:  |[33m====================                              [0m| 41%  Progress:  |[33m=====================                             [0m| 42%  Progress:  |[33m=====================                             [0m| 43%  Progress:  |[33m======================                            [0m| 44%  Progress:  |[33m======================                            [0m| 45%  Progress:  |[33m=======================                           [0m| 47%  Progress:  |[33m========================                          [0m| 48%  Progress:  |[33m========================                          [0m| 49%  Progress:  |[33m=========================                         [0m| 50%  Progress:  |[33m=========================                         [0m| 51%  Progress:  |[33m==========================                        [0m| 52%  Progress:  |[33m===========================                       [0m| 54%  Progress:  |[33m===========================                       [0m| 55%  Progress:  |[33m============================                      [0m| 56%  Progress:  |[33m============================                      [0m| 57%  Progress:  |[33m=============================                     [0m| 58%  Progress:  |[33m=============================                     [0m| 59%  Progress:  |[33m==============================                    [0m| 60%  Progress:  |[33m===============================                   [0m| 62%  Progress:  |[33m===============================                   [0m| 63%  Progress:  |[33m================================                  [0m| 64%  Progress:  |[33m================================                  [0m| 65%  Progress:  |[33m=================================                 [0m| 66%  Progress:  |[33m=================================                 [0m| 67%  Progress:  |[33m==================================                [0m| 68%  Progress:  |[33m===================================               [0m| 70%  Progress:  |[33m===================================               [0m| 71%  Progress:  |[33m====================================              [0m| 72%  Progress:  |[33m====================================              [0m| 73%  Progress:  |[33m=====================================             [0m| 74%  Progress:  |[33m=====================================             [0m| 75%  Progress:  |[33m======================================            [0m| 77%  Progress:  |[33m=======================================           [0m| 78%  Progress:  |[33m=======================================           [0m| 79%  Progress:  |[33m========================================          [0m| 80%  Progress:  |[33m========================================          [0m| 81%  Progress:  |[33m=========================================         [0m| 82%  Progress:  |[33m=========================================         [0m| 83%  Progress:  |[33m==========================================        [0m| 85%  Progress:  |[33m===========================================       [0m| 86%  Progress:  |[33m===========================================       [0m| 87%  Progress:  |[33m============================================      [0m| 88%  Progress:  |[33m============================================      [0m| 89%  Progress:  |[33m=============================================     [0m| 90%  Progress:  |[33m=============================================     [0m| 91%  Progress:  |[33m==============================================    [0m| 93%  Progress:  |[33m===============================================   [0m| 94%  Progress:  |[33m===============================================   [0m| 95%  Progress:  |[33m================================================  [0m| 96%  Progress:  |[33m================================================  [0m| 97%  Progress:  |[33m================================================= [0m| 98%  Progress:  |[32m==================================================[0m| 100%
+
+  Linker status:
+   - No. of objects:  4
+   - Memory usage:    0.54 kB
+
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Creating initial catalogue
+[0;36m____________________________________________________________________________[0m
+
+  Initial source catalogue created.
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Measuring source parameters
+[0;36m____________________________________________________________________________[0m
+
+  Found 4 sources in need of parameterisation.
+  Assuming beam size of 2.0 x 1.7 pixels.
+
+  Progress:  |[33m============                                      [0m| 25%  Progress:  |[33m=========================                         [0m| 50%  Progress:  |[33m=====================================             [0m| 75%  Progress:  |[32m==================================================[0m| 100%
+
+
+[36m  Elapsed time: 00:00:00 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Creating moment maps
+[0;36m____________________________________________________________________________[0m
+
+  Creating FITS file: cube_mom0.fits
+  Creating FITS file: cube_mom1.fits
+  Creating FITS file: cube_mom2.fits
+  Creating FITS file: cube_chan.fits
+
+[36m  Elapsed time: 00:00:01 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Writing mask cube
+[0;36m____________________________________________________________________________[0m
+
+  Creating FITS file: cube_mask-2d.fits
+  Creating FITS file: cube_mask.fits
+
+[36m  Elapsed time: 00:00:01 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Writing source catalogue
+[0;36m____________________________________________________________________________[0m
+
+  Writing ASCII file:   cube_cat.txt
+  Writing VOTable file: cube_cat.xml
+
+[36m  Elapsed time: 00:00:01 h
+  CPU time:     00:00:00 h[0m
+
+[36m____________________________________________________________________________[0;1m
+
+ Pipeline finished
+[0;36m____________________________________________________________________________[0m
+

@@ -1,0 +1,198 @@
+
+ ____________________________________________
+[____________________________________________]
+
+ :: Running baygaud_classify.py with _baygaud_params.yaml ::
+
+
+ ____________________________________________
+[____________________________________________]
+[--> read fits header ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> load baygaud-segs from the output dir ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> load gfit_results from the baygaud-segs output ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> make baygaud-classified output directories ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> declare _fitsarray_gfit_results1 : 4d numpy array ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> declare _fitsarray_gfit_results2 : 3d numpy array ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> declare bevidences : 3d numpy array ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> declare g_num_sort : 3d numpy array ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> declare numpy arrays for S/N slices: 3d numpy arrays ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> check _fitsarray_gfit_results2 for (x:10, y:10)...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> extract sn_ng_opt_slice from _fitsarray_Gfit_results2 array[params, y, x] ...]
+
+
+0 0 0.0 0.0 0.0004812211263924837
+0 1 0.0 0.0 0.0004812211263924837
+0 2 0.0 0.0 0.0004812211263924837
+
+1 1 0.0 0.0 0.0004812211263924837
+1 2 0.0 0.0 0.0004812211263924837
+
+2 2 0.0 0.0 0.0004812211263924837
+
+ ____________________________________________
+[____________________________________________]
+[--> check sn_ng_opt_slice ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> check sn_pass_ng_opt from sn_ng_opt_slice ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> extract log-Z from _fitsarray_gfit_results2 array ...]
+[--> to bevidences array ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> sort the coupled (max_ngauss, log-Z) with log-Z ...]
+[--> in descending order : max(log-Z) first ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> derive the optimal number of Gaussian components ...]
+[--> given the sn_pass + bayes factor limit ...]
+[--> opt_ngmap_gmax_ng array : optimal n-gauss array ...]
+[--> max_ngauss: 3 ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> (10, 10) -- optimal ng: -1 ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> extract :: single Gaussian component:: given the optimal n-gauss map ...]
+
+
+
+| ... extracting sgfit results ... |
+| vlos-lower: 384 [km/s]
+| vlos-upper: 739 [km/s]
+| vdisp-lower: 2 [km/s]
+| vdisp-upper: 189 [km/s]
+
+[—> fits written .. (1, 201, 201)
+ ____________________________________________
+[____________________________________________]
+[--> extract :: perfect single Gaussian component:: given the optimal n-gauss map ...]
+
+
+
+| ... extracting psgfit results ... |
+| vlos-lower: 384 [km/s]
+| vlos-upper: 739 [km/s]
+| vdisp-lower: 2 [km/s]
+| vdisp-upper: 189 [km/s]
+
+[—> fits written .. (1, 201, 201)
+ ____________________________________________
+[____________________________________________]
+[--> extract :: kinematically cool Gaussian component:: given the optimal n-gauss map ...]
+
+
+
+| ... extracting kinematically cool components ... |
+| vlos-lower: 0 [km/s]
+| vlos-upper: 400 [km/s]
+| vdisp-lower: 5 [km/s]
+| vdisp-upper: 12 [km/s]
+
+[—> fits written .. (1, 201, 201)
+ ____________________________________________
+[____________________________________________]
+[--> extract :: kinematically warm Gaussian component:: given the optimal n-gauss map ...]
+
+
+
+| ... extracting kinematically warm components ... |
+| vlos-lower: 0 [km/s]
+| vlos-upper: 400 [km/s]
+| vdisp-lower: 12 [km/s]
+| vdisp-upper: 40 [km/s]
+
+[—> fits written .. (1, 201, 201)
+ ____________________________________________
+[____________________________________________]
+[--> extract :: kinematically hot Gaussian component:: given the optimal n-gauss map ...]
+
+
+
+| ... extracting kinematically hot components ... |
+| vlos-lower: 0 [km/s]
+| vlos-upper: 400 [km/s]
+| vdisp-lower: 40 [km/s]
+| vdisp-upper: 999 [km/s]
+
+[—> fits written .. (1, 201, 201)
+ ____________________________________________
+[____________________________________________]
+[--> extract :: all the Gaussian components:: given max_ngauss ...]
+
+
+[—> fits written .. (1, 201, 201)
+ ____________________________________________
+[____________________________________________]
+[--> extract :: hvc component:: given the optimal n-gauss map ...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> save the full baygaud_gfit_results in fits format...]
+
+
+ ____________________________________________
+[____________________________________________]
+[--> save the full baygaud_gfit_results in binary format...]
+ ____________________________________________
+[____________________________________________]
+[--> _fitsarray_gfit_results2-shape:  (96, 201, 201)
+[--> baygaud classification completed: 3 Gaussians...]
+
+
+[--> duration:  0:00:01.174978
+
