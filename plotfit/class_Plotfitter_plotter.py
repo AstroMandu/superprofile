@@ -10,6 +10,7 @@ from PIL import Image, ImageFile
 from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area
 import pandas as pd
 import pylab as plt
+import time
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -385,7 +386,7 @@ class Plotter:
         def paste_image(path_image, dict_coord):
                         
             while os.path.exists(path_image)==False:
-                os.sleep(1)
+                time.sleep(1)
             
             frontImage = Image.open(path_image)
             

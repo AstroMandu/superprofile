@@ -150,6 +150,17 @@ class Plotfit:
         
         self.vdisp_low_intrinsic = vdisp_low_intrinsic
         
+    def _nm_optimize(self, fun, x0):
+        # per-parameter step sizes (10% of magnitude, floored)
+        step = 0.1 * np.maximum(1.0, np.abs(np.asarray(x0, dtype=float)))
+        init = np.vstack([x0, *(np.asarray(x0) + np.eye(len(x0)) * step)])
+        return minimize(fun, x0, method="Nelder-Mead",
+                        options={"adaptive": True,
+                                "initial_simplex": init,
+                                "maxfev": 100000,
+                                "xatol": 1e-4,
+                                "fatol": 1e-4})        
+        
     def writestat(self, message):
         f = open(self.path_temp/f'stat.{self.name_cube}.txt', 'w')
         f.write(f'{self.name_cube:>{self.longest_length}} {message}')
@@ -326,7 +337,7 @@ class Plotfit:
         if guess is None:
             guess = np.array([self.ymax,0.0,10.0,0.0])
         
-        res = minimize(gmodel.log_prob_guess, guess, method='Nelder-Mead')
+        res = self._nm_optimize(gmodel.log_prob_guess, guess)
         
         if return_gmodel: return gmodel.array_to_dict_guess(res.x), gmodel
         return gmodel.array_to_dict_guess(res.x)
@@ -636,145 +647,301 @@ class Plotfit:
         
         return
     
+    # def resample(self, nsample:int=1499, pbar_resample:bool=False) -> None:
+        
+    #     SNR1, SNR2 = self.df.loc[0,['SNR1','SNR2']]
+        
+    #     if np.isfinite(SNR1)==False or np.isfinite(SNR2)==False:
+    #         return
+        
+    #     self.nsample = nsample
+    #     self.df_params['SNR2'] = SNR2
+    #     self.stat = 'Resample'
+        
+    #     names_param = np.array(self.params_2gfit)
+    #     guess = np.array([self.df[label][0] for label in names_param], dtype=float)
+    #     resampled = np.full((self.nsample,len(guess)),np.nan)
+        
+    #     S1s = np.full(self.nsample, np.nan)
+        
+    #     guess_1G = self.df.loc[0,['A1','V1','S1','B1']]
+    #     N1 = self.df['N1'][0]
+                
+    #     if pbar_resample:
+    #         pbar = tqdm(total=nsample)
+            
+    #     trueiter = 0
+        
+    #     n = len(self.y)
+    #     boot_idx = np.random.randint(0, len(self.residual_2GFIT), size=(nsample, n))
+
+    #     last_good = guess.copy()
+        
+    #     timei = time.time()
+        
+    #     for j in range(nsample):
+            
+    #         while True:
+    #             # self.x_w_noise = xx     + np.random.normal(0,self.chansep/2,len(xx))
+    #             # y_w_noise = self.y + np.random.normal(0,self.df['N2'][0],len(self.y))
+    #             idx = boot_idx[j]
+    #             y_w_noise = self.y + self.residual_2GFIT[idx]
+    #             ymax = y_w_noise.max()
+                
+    #             gmodel = self.gmodel
+    #             gmodel.y = y_w_noise
+                
+    #             res_1G    = self.makefit_1G_minimize(self.x, y_w_noise, self.e_y, guess=guess_1G)
+    #             A1, V1, S1, B1 = (res_1G[key] for key in ['A1','V1','S1','B1'])
+                
+    #             gmodel.update_bound('A21',np.array([-0.001, 1.5], dtype=np.float64)*ymax)
+    #             gmodel.update_bound('A22',np.array([-0.001, 1.5], dtype=np.float64)*ymax)
+    #             # if self.dict_params['B2']=='free':
+    #             #     gmodel.update_bound('B2',np.array([B1-N1,B1+N1],dtype=np.float64))
+                
+    #             # res = minimize(gmodel.log_prob_guess, guess, method='Nelder-Mead', tol=1e-8)
+    #             res = self._nm_optimize(gmodel.log_prob_guess, last_good)
+    #             # print(gmodel.names_param)
+    #             # print(gmodel.return_bounds_list())
+    #             # res = minimize(gmodel.log_prob_guess, guess, bounds=gmodel.return_bounds_list(), method='Powell', tol=1e-8)
+    #             trueiter+=1
+    #             if np.isfinite(res.fun):
+    #                 S1s[j] = S1
+    #                 resampled[j,:] = res.x
+    #                 last_good = res.x.copy()   # <-- warm start for next bootstrap
+    #                 break
+                
+    #         if j%100==0 and j!=0:
+    #             timef = time.time()
+    #             eta = datetime.timedelta(seconds=int((nsample-j)/(100/(timef-timei))))
+    #             self.writestat(f'Resample {j} {eta}')
+    #             self.resampled = resampled[:j,:]
+    #             timei = timef
+            
+    #         if pbar_resample: pbar.update()
+        
+    #     self.resampled = resampled    
+    #     # df_temp = pd.DataFrame()
+    #     # for i,param in enumerate(names_param):
+    #     #     df_temp[param] = self.resampled[:,i]
+    #     # print(df_temp.to_string())
+            
+    #     for i, label in enumerate(names_param):
+    #         data_label = resampled[:,i]
+    #         self.df_resampled[label]      = np.nanmean(data_label)
+    #         self.df_resampled['e_'+label] = np.nanstd(data_label)
+            
+    #     def fillstat(label, data):
+    #         self.df_params[label]      = np.nanmean(data)
+    #         self.df_params['e_'+label] = np.nanstd(data)
+            
+    #     sns = resampled[:,np.argwhere(self.params_2gfit=='S21')[0]]
+    #     sbs = resampled[:,np.argwhere(self.params_2gfit=='S22')[0]]
+    #     Ans = gaussian_area(resampled[:,np.argwhere(self.params_2gfit=='A21')[0]], sns)
+    #     Abs = gaussian_area(resampled[:,np.argwhere(self.params_2gfit=='A22')[0]], sbs)
+    #     Ats = Ans+Abs
+        
+    #     if self.truth_from_resampling:
+    #         print(f'[Plotfit {self.name_cube}] truth_from_resampling is True; filling df with resampled values')
+    #         for param in gmodel.names_param:
+    #             self.df[param] = np.median(sort_outliers(resampled[:,np.argwhere(self.params_2gfit==param)[0]]))
+        
+    #     A21,A22,S21,S22 = self.df.loc[0,['A21','A22','S21','S22']]
+    #     An,Ab = gaussian_area(A21,S21), gaussian_area(A22,S22)
+        
+    #     self.df_params[  'sn'] = S21
+    #     self.df_params[  'sb'] = S22
+    #     self.df_params[  'An'] = An
+    #     self.df_params[  'Ab'] = Ab
+    #     self.df_params[  'At'] = An+Ab
+        
+    #     self.df_params['e_S1'] = np.nanstd(S1s)
+        
+    #     self.df_params['e_sn'] = np.nanstd(sns)
+    #     self.df_params['e_sb'] = np.nanstd(sbs)
+    #     self.df_params['e_An'] = np.nanstd(Ans)
+    #     self.df_params['e_Ab'] = np.nanstd(Abs)
+    #     self.df_params['e_At'] = np.nanstd(Ats)
+        
+    #     if self.truth_from_resampling:
+    #         snsbs = sns/sbs
+    #         snsbs = snsbs[snsbs<0.9]
+    #         self.df_params['sn/sb']      = np.median(sort_outliers(snsbs))
+    #         self.df_params['An/At']      = np.median(sort_outliers(Ans/Ats))
+    #         self.df_params['log(sb-sn)'] = np.nanmedian(sort_outliers(np.log10(sbs-sns)))
+    #     else:
+    #         self.df_params[  'sn/sb']    = self.df_params['sn'][0]/self.df_params['sb'][0]
+    #         self.df_params[  'An/At']    = self.df_params['An'][0]/self.df_params['At'][0]
+    #         self.df_params['log(sb-sn)'] = np.log10(self.df_params['sb'][0]-self.df_params['sn'][0])
+            
+    #     self.df_params['e_sn/sb'] = np.nanstd(snsbs)
+    #     self.df_params['e_An/At'] = np.nanstd(Ans/Ats)
+    #     self.df_params['e_log(sb-sn)'] = np.nanstd(np.log10(sbs-sns))
+        
+    #     # fillstat('sn', sns)
+    #     # fillstat('sb', sbs)
+    #     # fillstat('An', Ans)
+    #     # fillstat('Ab', Abs)
+    #     # fillstat('At', Ats)
+    #     # fillstat('sn/sb', sns/sbs)
+    #     # fillstat('An/At', Ans/Ats)
+        
+    #     self.resampled = resampled
+    #     self.resample_success = True
+    #     self.df_params['Reliable'] = 'Y'
+        
+    #     return
+
+    # === REPLACE the entire resample() in Plotfit ===
     def resample(self, nsample:int=1499, pbar_resample:bool=False) -> None:
-        
-        SNR1, SNR2 = self.df.loc[0,['SNR1','SNR2']]
-        
-        if np.isfinite(SNR1)==False or np.isfinite(SNR2)==False:
+
+        SNR1, SNR2 = self.df.loc[0, ['SNR1', 'SNR2']]
+        if not np.isfinite(SNR1) or not np.isfinite(SNR2):
             return
-        
+
         self.nsample = nsample
         self.df_params['SNR2'] = SNR2
         self.stat = 'Resample'
-        
+
         names_param = np.array(self.params_2gfit)
-        guess = np.zeros(len(names_param))
-        for i, label in enumerate(names_param):
-            guess[i] = self.df[label][0]
-        resampled = np.full((self.nsample,len(guess)),np.nan)
-        
+        # We'll store only the free params as before
+        resampled = np.full((self.nsample, len(names_param)), np.nan)
         S1s = np.full(self.nsample, np.nan)
-        
-        guess_1G = self.df.loc[0,['A1','V1','S1','B1']]
+
+        # vectorized bootstrap indices (C2)
+        n = len(self.y)
+        boot_idx = np.random.randint(0, len(self.residual_2GFIT), size=(nsample, n))
+
+        # build initial z from current 2G fit
+        V21, V22, S21, S22 = self.df.loc[0, ['V21', 'V22', 'S21', 'S22']]
+        z0 = np.array([V21, V22, np.log(np.maximum(S21, 1e-6)), np.log(np.maximum(S22, 1e-6))], dtype=float)
+        last_good = z0.copy()
+
+        guess_1G = self.df.loc[0, ['A1', 'V1', 'S1', 'B1']]
         N1 = self.df['N1'][0]
-                
+
         if pbar_resample:
             pbar = tqdm(total=nsample)
-            
+
         trueiter = 0
         timei = time.time()
-        
+
         for j in range(nsample):
-            
             while True:
-                # self.x_w_noise = xx     + np.random.normal(0,self.chansep/2,len(xx))
-                # y_w_noise = self.y + np.random.normal(0,self.df['N2'][0],len(self.y))
-                y_w_noise = self.y + np.random.choice(self.residual_2GFIT, len(self.y), replace=True)
+                # bootstrap-resampled spectrum
+                idx = boot_idx[j]
+                y_w_noise = self.y + self.residual_2GFIT[idx]
                 ymax = y_w_noise.max()
-                
+
                 gmodel = self.gmodel
-                gmodel.y = y_w_noise
-                
-                res_1G    = self.makefit_1G_minimize(self.x, y_w_noise, self.e_y, guess=guess_1G)
-                A1, V1, S1, B1 = (res_1G[key] for key in ['A1','V1','S1','B1'])
-                
-                gmodel.update_bound('A21',np.array([-0.001, 1.5], dtype=np.float64)*ymax)
-                gmodel.update_bound('A22',np.array([-0.001, 1.5], dtype=np.float64)*ymax)
+                gmodel.y = y_w_noise  # mutate safely (single-thread inside outer pool)
+
+                # 1G anchor (your existing anchor)
+                res_1G = self.makefit_1G_minimize(self.x, y_w_noise, self.e_y, guess=guess_1G)
+                A1, V1, S1, B1 = (res_1G[k] for k in ['A1', 'V1', 'S1', 'B1'])
+
+                # update only the amplitude bounds (kept for plotting/hygiene; nl objective doesn't use them directly)
+                gmodel.update_bound('A21', np.array([-0.001, 1.5], dtype=np.float64) * ymax)
+                gmodel.update_bound('A22', np.array([-0.001, 1.5], dtype=np.float64) * ymax)
                 # if self.dict_params['B2']=='free':
-                #     gmodel.update_bound('B2',np.array([B1-N1,B1+N1],dtype=np.float64))
-                
-                res = minimize(gmodel.log_prob_guess, guess, method='Nelder-Mead', tol=1e-8)
-                # print(gmodel.names_param)
-                # print(gmodel.return_bounds_list())
-                # res = minimize(gmodel.log_prob_guess, guess, bounds=gmodel.return_bounds_list(), method='Powell', tol=1e-8)
-                trueiter+=1
+                #     gmodel.update_bound('B2', np.array([B1 - N1, B1 + N1], dtype=np.float64))
+
+                # === nonlinear NM over z = [V21, V22, logS21, logS22]
+                res = self._nm_optimize(gmodel.log_prob_2G_nl_guess, last_good)
+                trueiter += 1
+
                 if np.isfinite(res.fun):
+                    # recover physical params for storage (use gmodel's LSQ)
+                    V21_hat, V22_hat = res.x[0], res.x[1]
+                    S21_hat, S22_hat = np.exp(res.x[2]), np.exp(res.x[3])
+                    (A21_hat, A22_hat, B2_hat), _, _ = gmodel._solve_linear_A_B(V21_hat, S21_hat, V22_hat, S22_hat)
+
+                    # fill resampled row respecting names_param order
+                    row = []
+                    for key in names_param:
+                        if   key == 'A21': row.append(A21_hat)
+                        elif key == 'A22': row.append(A22_hat)
+                        elif key == 'V21': row.append(V21_hat)
+                        elif key == 'V22': row.append(V22_hat)
+                        elif key == 'S21': row.append(S21_hat)
+                        elif key == 'S22': row.append(S22_hat)
+                        elif key == 'B2':  row.append(B2_hat)
+                        else:               row.append(self.df[key][0])  # safety
+                    resampled[j, :] = np.array(row, dtype=float)
+
                     S1s[j] = S1
-                    resampled[j,:] = res.x
+                    last_good = res.x.copy()  # warm-start (C1)
                     break
-                
-            if j%100==0 and j!=0:
+
+            if j % 100 == 0 and j != 0:
                 timef = time.time()
-                eta = datetime.timedelta(seconds=int((nsample-j)/(100/(timef-timei))))
+                eta = datetime.timedelta(seconds=int((nsample - j) / (100 / (timef - timei))))
                 self.writestat(f'Resample {j} {eta}')
-                self.resampled = resampled[:j,:]
+                self.resampled = resampled[:j, :]
                 timei = timef
-            
-            if pbar_resample: pbar.update()
-        
-        self.resampled = resampled    
-        # df_temp = pd.DataFrame()
-        # for i,param in enumerate(names_param):
-        #     df_temp[param] = self.resampled[:,i]
-        # print(df_temp.to_string())
-            
+
+            if pbar_resample:
+                pbar.update()
+
+        self.resampled = resampled
+
+        # summarize into df_resampled / df_params (unchanged logic)
         for i, label in enumerate(names_param):
-            data_label = resampled[:,i]
+            data_label = resampled[:, i]
             self.df_resampled[label]      = np.nanmean(data_label)
-            self.df_resampled['e_'+label] = np.nanstd(data_label)
-            
+            self.df_resampled['e_' + label] = np.nanstd(data_label)
+
+        # rebuild derived stats (unchanged from your code)
         def fillstat(label, data):
             self.df_params[label]      = np.nanmean(data)
-            self.df_params['e_'+label] = np.nanstd(data)
-            
-        sns = resampled[:,np.argwhere(self.params_2gfit=='S21')[0]]
-        sbs = resampled[:,np.argwhere(self.params_2gfit=='S22')[0]]
-        Ans = gaussian_area(resampled[:,np.argwhere(self.params_2gfit=='A21')[0]], sns)
-        Abs = gaussian_area(resampled[:,np.argwhere(self.params_2gfit=='A22')[0]], sbs)
-        Ats = Ans+Abs
-        
+            self.df_params['e_' + label] = np.nanstd(data)
+
+        sns = resampled[:, np.argwhere(self.params_2gfit == 'S21')[0]]
+        sbs = resampled[:, np.argwhere(self.params_2gfit == 'S22')[0]]
+        Ans = gaussian_area(resampled[:, np.argwhere(self.params_2gfit == 'A21')[0]], sns)
+        Abs = gaussian_area(resampled[:, np.argwhere(self.params_2gfit == 'A22')[0]], sbs)
+        Ats = Ans + Abs
+
         if self.truth_from_resampling:
             print(f'[Plotfit {self.name_cube}] truth_from_resampling is True; filling df with resampled values')
             for param in gmodel.names_param:
-                self.df[param] = np.median(sort_outliers(resampled[:,np.argwhere(self.params_2gfit==param)[0]]))
-        
-        A21,A22,S21,S22 = self.df.loc[0,['A21','A22','S21','S22']]
-        An,Ab = gaussian_area(A21,S21), gaussian_area(A22,S22)
-        
-        self.df_params[  'sn'] = S21
-        self.df_params[  'sb'] = S22
-        self.df_params[  'An'] = An
-        self.df_params[  'Ab'] = Ab
-        self.df_params[  'At'] = An+Ab
-        
+                self.df[param] = np.median(sort_outliers(resampled[:, np.argwhere(self.params_2gfit == param)[0]]))
+
+        A21, A22, S21, S22 = self.df.loc[0, ['A21', 'A22', 'S21', 'S22']]
+        An, Ab = gaussian_area(A21, S21), gaussian_area(A22, S22)
+
+        self.df_params['sn'] = S21
+        self.df_params['sb'] = S22
+        self.df_params['An'] = An
+        self.df_params['Ab'] = Ab
+        self.df_params['At'] = An + Ab
+
         self.df_params['e_S1'] = np.nanstd(S1s)
-        
         self.df_params['e_sn'] = np.nanstd(sns)
         self.df_params['e_sb'] = np.nanstd(sbs)
         self.df_params['e_An'] = np.nanstd(Ans)
         self.df_params['e_Ab'] = np.nanstd(Abs)
         self.df_params['e_At'] = np.nanstd(Ats)
-        
+
         if self.truth_from_resampling:
-            snsbs = sns/sbs
-            snsbs = snsbs[snsbs<0.9]
+            snsbs = sns / sbs
+            snsbs = snsbs[snsbs < 0.9]
             self.df_params['sn/sb']      = np.median(sort_outliers(snsbs))
-            self.df_params['An/At']      = np.median(sort_outliers(Ans/Ats))
-            self.df_params['log(sb-sn)'] = np.nanmedian(sort_outliers(np.log10(sbs-sns)))
+            self.df_params['An/At']      = np.median(sort_outliers(Ans / Ats))
+            self.df_params['log(sb-sn)'] = np.nanmedian(sort_outliers(np.log10(sbs - sns)))
         else:
-            self.df_params[  'sn/sb']    = self.df_params['sn'][0]/self.df_params['sb'][0]
-            self.df_params[  'An/At']    = self.df_params['An'][0]/self.df_params['At'][0]
-            self.df_params['log(sb-sn)'] = np.log10(self.df_params['sb'][0]-self.df_params['sn'][0])
-            
-        self.df_params['e_sn/sb'] = np.nanstd(snsbs)
-        self.df_params['e_An/At'] = np.nanstd(Ans/Ats)
-        self.df_params['e_log(sb-sn)'] = np.nanstd(np.log10(sbs-sns))
-        
-        # fillstat('sn', sns)
-        # fillstat('sb', sbs)
-        # fillstat('An', Ans)
-        # fillstat('Ab', Abs)
-        # fillstat('At', Ats)
-        # fillstat('sn/sb', sns/sbs)
-        # fillstat('An/At', Ans/Ats)
-        
-        self.resampled = resampled
+            self.df_params['sn/sb']      = self.df_params['sn'][0] / self.df_params['sb'][0]
+            self.df_params['An/At']      = self.df_params['An'][0] / self.df_params['At'][0]
+            self.df_params['log(sb-sn)'] = np.log10(self.df_params['sb'][0] - self.df_params['sn'][0])
+
+        self.df_params['e_sn/sb']        = np.nanstd(sns / sbs)
+        self.df_params['e_An/At']        = np.nanstd(Ans / Ats)
+        self.df_params['e_log(sb-sn)']   = np.nanstd(np.log10(sbs - sns))
+
         self.resample_success = True
         self.df_params['Reliable'] = 'Y'
-        
         return
 
-    
     
     def check_config(self) -> None:
         
