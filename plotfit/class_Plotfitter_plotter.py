@@ -319,7 +319,8 @@ class Plotter:
             'An/At':sort_outliers(An/At),
             'log(sb-sn)':sort_outliers(np.log10(sb-sn)),
         }
-        dict_resampled['sn/sb'] = dict_resampled['sn/sb'][dict_resampled['sn/sb']<0.9]
+        # dict_resampled['sn/sb'] = dict_resampled['sn/sb'][dict_resampled['sn/sb']<0.9]
+        # print(dict_resampled)
         
         dict_title = {
             'sn':r'$\sigma_\mathrm{n}$',
@@ -342,7 +343,7 @@ class Plotter:
         df = pd.DataFrame()
         
         df[key] = dict_resampled[key]
-        
+
         chain = Chain(samples=df, name='Resampled')
         consumer = ChainConsumer().add_chain(chain)
         
@@ -384,20 +385,23 @@ class Plotter:
             return [dict_coord['l'],dict_coord['b'],dict_coord['r']-dict_coord['l'],dict_coord['t']-dict_coord['b']]
         
         def paste_image(path_image, dict_coord):
-                        
-            while os.path.exists(path_image)==False:
-                time.sleep(1)
-            
+            # Option A: skip if not there
+            if not os.path.exists(path_image):
+                return
+
+            # Option B (safer): short timeout
+            # t0 = time.time()
+            # while not os.path.exists(path_image):
+            #     if time.time() - t0 > 10:  # 10s
+            #         return
+            #     time.sleep(0.25)
+
             frontImage = Image.open(path_image)
-            
             width_pix = int(dict_coord['r']-dict_coord['l'])
             heigt_pix = int(dict_coord['t']-dict_coord['b'])
-            
             frontImage_red = frontImage.resize((width_pix,heigt_pix))
-            background.paste(frontImage_red, [int(dict_coord['l']),int(bgheight-dict_coord['t'])], frontImage_red) 
+            background.paste(frontImage_red, [int(dict_coord['l']), int(bgheight-dict_coord['t'])], frontImage_red)
             os.remove(path_image)
-
-            return
         
         suffix = self.suffix if self.suffix!='' else '_'
         
@@ -524,6 +528,7 @@ class Plotter:
         
         
         fig.savefig(self.savename_atlas)
+        
             
         background = Image.open(self.savename_atlas)
         bgwidth, bgheight = background.size
@@ -538,11 +543,12 @@ class Plotter:
             try: paste_image(self.savename_walks, coord_walks)
             except AttributeError: pass
             
+            
         if 'sn' in self.df_params:
             self.makeplot_corner_resample(savefig=True)
             try: paste_image(self.savename_corner_resample, coord_corner_resample)
             except AttributeError or FileNotFoundError: pass
-            
+                        
         if 'sn' in self.df_params:
             keys = ['sn/sb','An/At','log(sb-sn)']
             width = (coord_GFIT_resample['r']-coord_GFIT_resample['l'])+0.015
@@ -561,7 +567,9 @@ class Plotter:
                     self.makeplot_paramshist(key=key)
                     try: paste_image(self.savename_paramshist, coord_paramshist)
                     except AttributeError or FileNotFoundError: pass
-            
+                    
         background.save(self.savename_atlas, format="png")
+        
+        
         
         return

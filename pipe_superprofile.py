@@ -388,11 +388,11 @@ homedirs = [
     # path_data/'test_chanres/5.16kms',
     # path_data/'test_chanres/10.3kms',
     # path_data+'/Rory/RPfiles',
-    # '/home/mskim/workspace/research/data/AVID_halfbeam'
+    '/home/mskim/workspace/research/data/AVID_halfbeam'
     
     # '/home/mskim/workspace/research/data/test'
     # '/home/mskim/workspace/research/data/test_LBFGSB'
-    '/home/mskim/workspace/research/data/test_neldermead'
+    # '/home/mskim/workspace/research/data/test_neldermead'
     # '/home/mskim/workspace/research/data/test_SNR3_snch_sbbw'
 ]
 
@@ -403,10 +403,10 @@ nametype_galaxy = '*'
 
 # multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.6,2.0, 0.1,0.3,0.5,0.7,0.9,1.1,1.3,1.4,1.5,1.7,1.8,1.9]#, 2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9,3.0]
 # multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2.0]
-# multipliers = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5]
+multipliers = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5]
 
 # multipliers = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
-multipliers = [0.9]
+# multipliers = [0.9]
 
 # multipliers = [0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
 
@@ -414,7 +414,7 @@ multipliers = [0.9]
 # multipliers = [2.9,3.0]
 
 # multipliers = multipliers[::2]
-# multipliers = np.flip(multipliers[1::2])
+multipliers = np.flip(multipliers[1::2])
 # multipliers = np.flip(multipliers)
 
 # col_radius = 'r25';      radtag='r25'
@@ -431,23 +431,23 @@ use_secondary_vf = True; #suffix+='VFsec_'
 
 truth_from_resampling = True
 
-num_cores = 30
+num_cores = 32
 
-remove_temp        = 1
-overwrite_classify = 1
+remove_temp        = 0
+overwrite_classify = 0
 bool_do_clfy       = 1
 
-bool_overwrite = 1
+bool_overwrite = 0
 
-bool_do_whole  = 1
+bool_do_whole  = 0
 bool_do_inner  = 0
 bool_do_outer  = 0
 bool_do_rings  = 0
 
-bool_do_angles = 0
+bool_do_angles = 1
 angles=[0,15,30,45,60,75,90,105,120,135,150,165,180,195,210,225,240,255,270,285,300,315,330,345]
 
-# angles = angles[::2]
+angles = angles[::2]
 # angles = np.flip(angles[1::2])
 
 bool_pack_output = 0
@@ -563,9 +563,9 @@ for homedir in homedirs:
         for angle in angles: do_angles_O05(angle,90)
         for angle in angles: do_angles_O10(angle,90)
         
-        # for angle in angles: do_angles(angle,180)
-        # for angle in angles: do_angles_O05(angle,180)
-        # for angle in angles: do_angles_O10(angle,180)
+        for angle in angles: do_angles(angle,180)
+        for angle in angles: do_angles_O05(angle,180)
+        for angle in angles: do_angles_O10(angle,180)
     
     try:
         shutil.rmtree(dict_glob['path_output']/f'temp_{dict_glob["seed"]}')
