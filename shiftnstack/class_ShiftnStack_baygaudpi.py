@@ -44,6 +44,11 @@ class ShiftnStack:
             data_vf_secondary = (fits.getdata(path_vf_secondary)*(u.m/u.s)).to(u.km/u.s).value
             if len(data_vf_secondary.shape)>2: data_vf_secondary = data_vf_secondary[0,:,:]
             data_vf_secondary = data_vf_secondary
+            
+            import astropy.constants as const
+            c = const.c.to('km/s').value
+            data_vf_secondary = c * (1 / (1 - data_vf_secondary / c) - 1)
+            
         else:
             data_vf_secondary = np.full((hedr_cube['NAXIS2'],hedr_cube['NAXIS1']),np.nan)
         self.data_vf_secondary = data_vf_secondary
@@ -272,6 +277,14 @@ class ShiftnStack:
             if self.pbar: pbar.update(1)
         
         if stack_secondary:
+            
+            import os
+            if os.path.exists(self.path_cube.parent/'cube_mom2.fits'):
+                data_mom2 = fits.getdata(self.path_cube.parent/'cube_mom2.fits')/1000.
+            else: data_mom2 = None
+            
+
+            
             for y,x in np.argwhere((np.isfinite(data_mask)) & (np.isfinite(data_vf_secondary))):
                 shift = data_vf_secondary[y,x]/self.chansep
                 index = argfind_nearest(sa_div_chan, shift)
@@ -280,6 +293,10 @@ class ShiftnStack:
                 yy  += shifted
                 NN  += (shifted != 0).astype(np.uint8)
                 
+                if data_mom2 is not None:
+                    self.dict_disp[count] = {'disp':data_mom2[y,x], 'e_disp':0.0}
+                    count+=1
+                    
                 # import pylab as plt
                 # fig, axs = plt.subplots(nrows=3)
                 # plt.rcParams['hatch.linewidth']=4

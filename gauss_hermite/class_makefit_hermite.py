@@ -33,7 +33,7 @@ dict_glob = {}
 
 @njit
 def model(y, a, h3, Z):
-    return a*np.exp(-0.5*np.square(y))*(1 + h3/np.sqrt(6)*(2*np.sqrt(2)*np.power(y,3.)**3-3*np.sqrt(2)*y)) + Z
+    return a*np.exp(-0.5*np.square(y))*(1 + h3/np.sqrt(6)*(2*np.sqrt(2)*np.power(y,3.)-3*np.sqrt(2)*y)) + Z
 
 @njit 
 def calc_y(xx,b,c):
@@ -78,9 +78,9 @@ def job(js):
         dict_glob['yy'] = np.float64(dict_glob['data_cube'][:,j,i])
         
         bounds = np.array([
-            [0.5*Mflx,1.5*Mflx],                                              # A
+            [0.1*Mflx,3.0*Mflx],                                              # A
             [dict_glob['spec_min'], dict_glob['spec_max']],
-            [0.0,500000.0],
+            [0.0,100000.0],
             [-1.0, 1.0],                                                                # h3
             [-Mflx, Mflx]                                                     # Z
         ])
@@ -101,12 +101,13 @@ def job(js):
                 
                 print(text)
         
-        res = minimize(cost, x0=guess, bounds=bounds, method='Nelder-Mead')
+        res = minimize(cost, x0=guess, bounds=bounds, method='Nelder-Mead',tol=1e-100)
+        # res = minimize(cost, x0=guess, bounds=bounds, method='L-BFGS-B')
                 
         #EVALUATION
         if res.x[2]<dict_glob['disp_lower']:
             continue
-        if res.x[0]/dict_glob['noise']<3:
+        if res.x[0]/dict_glob['noise']<2:
             continue
 
         df.loc[i,'A']      = res.x[0]
@@ -122,6 +123,52 @@ def job(js):
         return
     else:
         return
+    
+    
+def makeplot(path_mom0, path_mom1):
+    
+    from astropy.wcs import WCS
+    import pylab as plt
+    
+    wdir = os.path.dirname(path_mom0)
+    galname = os.path.basename(os.path.dirname(path_mom0))
+
+    data_mom0 = fits.getdata(path_mom0)
+    data_mom1 = fits.getdata(path_mom1)
+    
+    hdr = fits.getheader(path_mom0)
+    wcs = WCS(hdr).celestial
+
+    fig, axs = plt.subplots(figsize=(7,3), ncols=2, sharex=True, sharey=True, subplot_kw={'projection':wcs}, tight_layout=True)
+    
+    axs[0].imshow(data_mom0, interpolation='none', clim=np.nanpercentile(np.where(data_mom0==0, np.nan, data_mom0), (0,95)), cmap='Blues_r')
+    axs[1].imshow(data_mom1, interpolation='none', clim=np.nanpercentile(data_mom1, (5,95)), cmap='jet')
+    # axs[0].invert_yaxis()
+    
+    # try:
+    #     add_beam(axs[0], hdr, facecolor='none', edgecolor='white')
+    # except KeyError:
+    #     beam = Beam.from_fits_header(hdr)
+    #     add_beam(axs[0], major=beam.major, minor=beam.minor, angle=beam.pa, facecolor='none', edgecolor='white')
+    # add_scalebar(axs[0], length=1*u.kpc)
+    
+    # make_beammark(axs[0], scale_pix=(hdr['CDELT2']*u.deg), beam=Beam.from_fits_header(hdr))
+    # make_scalemark(axs[0], scale_pix=(hdr['CDELT2']*u.deg), distance=10*u.Mpc)
+    
+    axs[0].text(0.05,0.95, f'{galname}', transform=axs[0].transAxes, color='white', va='top', ha='left')
+    
+    for ax in axs:
+        ax.set_xlabel('RA (ICRS)')
+        ax.set_ylabel('Dec. (ICRS)')
+    
+    
+    # fig.suptitle(galname)
+
+    # fig.savefig(wdir+"/moments.png")
+    fig.savefig(wdir+'/hermite_{}.png'.format(galname))
+    # plt.show()
+
+    return 
 
 
 def main(n_cores, path_cube, path_velo, path_disp, path_mask=None, vdisp_intrinsic=5.*(u.km/u.s)):
@@ -167,7 +214,7 @@ def main(n_cores, path_cube, path_velo, path_disp, path_mask=None, vdisp_intrins
 
     spec_axis = SpectralCube.read(path_cube).with_spectral_unit(u.m/u.s, velocity_convention='optical').spectral_axis
     
-    vdisp_channel   = np.abs(np.diff(spec_axis)[0])/2.355
+    vdisp_channel   = np.abs(np.diff(spec_axis)[0])/2.355 * 3
     vdisp_lower     = np.sqrt((vdisp_intrinsic.to(u.m/u.s))**2 + vdisp_channel**2)
 
     # Generate a temporary directory that will store fit outputs
@@ -249,6 +296,8 @@ def main(n_cores, path_cube, path_velo, path_disp, path_mask=None, vdisp_intrins
     # fits.writeto(wdir+'/hermite.fits', output, hedr_vf, overwrite=True)
     np.save(wdir/'hermite', output)
     shutil.rmtree(path_temp)
+    
+    makeplot(wdir/'cube_mom0.fits', wdir/'hermite_vel.fits')
 
     print('[Hermite] Outputs saved at {}'.format(wdir))
 
@@ -262,10 +311,10 @@ if __name__=='__main__':
 
     from natsort import natsorted
     
-    # paths_cube = natsorted(list(Path('/media/cusped03/mskim/workspace/research/data').glob('*_halfbeam/*/cube.fits')))
-    # paths_cube = natsorted(list(Path('/home/mskim/workspace/research/data').glob('*_halfbeam/*/cube.fits')))
+    # paths_cube = [Path('/home/mskim/workspace/research/data/test/VCC1778/cube.fits')]
+    # paths_cube = [Path('/home/mskim/workspace/research/data/AVID_halfbeam/VCC169/cube.fits')]
     
-    paths_cube = [Path('/home/mandu/workspace/research/data/THINGS_halfbeam/NGC2403/cube.fits')]
+    paths_cube = Path('/home/mskim/workspace/research/data/AVID_halfbeam').glob('*/cube.fits')
     
     for path_cube in paths_cube:
     
@@ -278,8 +327,8 @@ if __name__=='__main__':
             continue
         
         print(wdir.name)
-        main(20,
+        main(50,
                 wdir/'cube.fits',
                 path_velo=wdir/'cube_mom1.fits',
                 path_disp=wdir/'cube_mom2.fits',
-                vdisp_intrinsic=5*(u.km/u.s))
+                vdisp_intrinsic=0*(u.km/u.s))

@@ -17,6 +17,7 @@ def makemask(path_cube, angle_center, angle_width, path_df, path_mask=None):
     path_cube = Path(path_cube)
     wdir = path_cube.parent
     galname = wdir.name
+    if galname=='VCC1091+98': galname='VCC1091'
 
     dfloc = df.loc[df['Name']==galname].reset_index(drop=True)
 

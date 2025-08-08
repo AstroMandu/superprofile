@@ -97,7 +97,7 @@ class Plotter:
             dict_truth[param] = self.df[param].item()
         consumer.add_truth(Truth(location=dict_truth, name='emcee', color='tab:blue'))
         for i, param in enumerate(self.names_param):
-            dict_truth[param] = np.nanmedian(self.resampled[:,i])
+            dict_truth[param] = np.nanmedian(sort_outliers(self.resampled[:,i]))
         consumer.add_truth(Truth(location=dict_truth, name='resampled', color='tab:orange'))
         
         try:
@@ -167,8 +167,6 @@ class Plotter:
         
     def makeplot_2GFIT(self, ax_2GFIT, ax_2Gres):
         
-        
-        
         ax_2GFIT.xaxis.set_tick_params(labelbottom=False)
         ax_2GFIT.yaxis.set_tick_params(  labelleft=False)
         ax_2Gres.yaxis.set_tick_params(  labelleft=False)
@@ -188,9 +186,9 @@ class Plotter:
             pass
         else:
             A21,A22,V21,V22,S21,S22,B2,N2 = self.df.loc[0,['A21','A22','V21','V22','S21','S22','B2','N2']]
-            model_narw = gauss(self.xs, A21,V21,S21)+B2/2
-            model_brod = gauss(self.xs, A22,V22,S22)+B2/2
-            model_totl = model_narw+model_brod
+            model_narw = gauss(self.xs, A21,V21,S21)+B2
+            model_brod = gauss(self.xs, A22,V22,S22)+B2
+            model_totl = model_narw+model_brod-B2
             ax.plot(self.xs, model_narw, color='tab:blue'  ,       label=r'$\sigma$={:.1f}'.format(S21))
             ax.plot(self.xs, model_brod, color='tab:orange',       label=r'$\sigma$={:.1f}'.format(S22))
             ax.plot(self.xs, model_totl, color='black', alpha=0.5, label=r'$\Sigma$')
@@ -211,8 +209,9 @@ class Plotter:
             F, crit = self.df.loc[0,['F-test','F-crit']]        
             ax_2Gres.text(0.01,0.99, r'F='+f'{F:.2f}({crit:.2f})', va='top',ha='left', transform=ax_2Gres.transAxes)
             
-            ax_2GFIT.axhspan(-N2+B2, N2+B2, color='gray', alpha=0.3    , zorder=0)
-            ax_2GFIT.axhspan(-5*N2+B2, 5*N2+B2, color='gray', alpha=0.3, zorder=0)
+            # Noise
+            ax_2GFIT.axhspan(-N2+B2, N2+B2,     color='gray', alpha=0.2, zorder=0)
+            ax_2GFIT.axhspan(-5*N2+B2, 5*N2+B2, color='gray', alpha=0.2, zorder=0)
             
             ax_2Gres.text(0.99,0.01, r'RMS='+f'{N2*1000:.2f} mJy', va='bottom',ha='right', transform=ax_2Gres.transAxes)
             
@@ -266,12 +265,12 @@ class Plotter:
         bins = np.arange(0,self.list_disp.max(),1)
         sns.histplot(self.list_disp, bins=bins, color='tab:gray', alpha=0.5, label='10.3 kms', ax=ax2, edgecolor=None, kde=True)
                 
-        ax.set_xlim(0,np.max([np.percentile(self.list_disp, 99), 30]))
-        
         S1 = self.df['S1'].item()
         ax.axvline(S1, color='black')
         ymax = ax.get_ylim()[1]
         ax.text(S1+0.5,ymax*0.98, r'$\sigma_\mathrm{1G}$'+f'\n{S1:.1f}', ha='left', va='top')
+        
+        ax.set_xlim(0,np.max([np.percentile(self.list_disp, 99), S1*3]))
         
         percentiles = [50,60,70,80,90,95,96,97,98,99]
         vals_percentile = np.percentile(self.list_disp,percentiles)
@@ -319,6 +318,7 @@ class Plotter:
             'An/At':sort_outliers(An/At),
             'log(sb-sn)':sort_outliers(np.log10(sb-sn)),
         }
+        dict_resampled['sn/sb'] = dict_resampled['sn/sb'][dict_resampled['sn/sb']<0.9]
         
         dict_title = {
             'sn':r'$\sigma_\mathrm{n}$',
@@ -359,7 +359,15 @@ class Plotter:
             ax.set_box_aspect(1)
             
             ax.axvline(self.df_params[key].item(), color='tab:blue')
-            ax.axvline(np.median(dict_resampled[key]), color='tab:orange')
+            ax.axvline(np.mean(dict_resampled[key]), color='tab:orange')
+            
+            ax.axvspan(self.df_params[key].item()-self.df_params['e_'+key].item(),
+                       self.df_params[key].item()+self.df_params['e_'+key].item(),
+                       color='tab:blue', alpha=0.1, label='emcee', zorder=0)
+            ax.axvspan(np.mean(dict_resampled[key])-np.std(dict_resampled[key]),
+                       np.mean(dict_resampled[key])+np.std(dict_resampled[key]),
+                       color='tab:orange', alpha=0.1, label='resampled', zorder=0)
+            
             ax.set_xlim(dict_xlim[key][0],dict_xlim[key][1])
             
             fig.savefig(self.savename_paramshist, transparent=True)

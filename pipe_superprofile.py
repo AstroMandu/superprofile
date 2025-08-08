@@ -41,7 +41,11 @@ def task_main(name_cube):
     
     path_cube = dict_glob[name_cube]['path_cube']
     path_mask = dict_glob[name_cube]['path_mask']
-    path_vf_secondary = dict_glob[name_cube]['path_vf_secondary']
+    
+    if use_secondary_vf:
+        path_vf_secondary = dict_glob[name_cube]['path_vf_secondary']
+    else:
+        path_vf_secondary = None
     
     mode = dict_glob['mode']
     
@@ -51,7 +55,8 @@ def task_main(name_cube):
         path_clfy = dict_glob[name_cube]['path_clfy']
         
         if os.path.exists(path_clfy)==False: return
-        if os.path.exists(path_vf_secondary)==False: path_vf_secondary=None
+        if path_vf_secondary is not None:
+            if os.path.exists(path_vf_secondary)==False: path_vf_secondary=None
         
         sns = ShiftnStack(path_cube, path_clfy, path_mask=path_mask, path_vf_secondary=path_vf_secondary)
         
@@ -65,6 +70,9 @@ def task_main(name_cube):
         sns.mask_velrange(-20*(u.km/u.s), 20*(u.km/u.s))
     
     sns.run(stack_secondary=True)
+    
+    if path_mask is not None:
+        if os.path.exists(path_mask): os.remove(path_mask)
     
     path_plot = dict_glob['path_plot']
     path_temp = dict_glob['path_temp']
@@ -81,6 +89,8 @@ def task_main(name_cube):
                         longest_length=dict_glob['longest_length'],
                         vdisp_low_intrinsic=dict_glob['vdisp_low_intrinsic']
                         )
+    
+    if truth_from_resampling: plotfit.truth_from_resampling = True
 
     plotfit.dict_params = dict_glob['dict_params']
     
@@ -241,7 +251,124 @@ def multirun_main(names_cube, num_cores=1):
     
     return
 
-path_data = Path('/home/mandu/workspace/research/data')
+def do_inner(multiplier):
+        
+    dict_glob['suffix'] = suffix+'I{}{}'.format(multiplier,dict_glob['radtag'])
+    masksuffix = '_I{}{}'.format(multiplier,dict_glob['radtag'])
+    run_makemask_ellipse(paths_cube, multiplier_radius=multiplier, col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
+
+    if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
+    # if False:
+        pass
+    else:
+        
+        for name_cube in names_cube:
+            dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(masksuffix)
+        if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
+        multirun_main(names_cube, num_cores=num_cores)
+            
+    return
+
+def do_outer(multiplier):
+        
+    dict_glob['suffix'] = suffix+'O{}{}'.format(multiplier,dict_glob['radtag'])
+    masksuffix = '_O{}{}'.format(multiplier,dict_glob['radtag'])
+    run_makemask_ellipse(paths_cube, multiplier_radius=multiplier, col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
+    
+    # # if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
+    # if False:
+    #     pass
+    # else:
+    #     for name_cube in names_cube:
+    #         dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(masksuffix)
+    #     if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
+    #     multirun_main(names_cube, num_cores=num_cores)
+    
+    return
+
+def do_rings(multiplier):
+    
+    dict_glob['suffix'] = suffix+'R{}{}'.format(multiplier,dict_glob['radtag'])
+    masksuffix = '_R{}{}'.format(multiplier,dict_glob['radtag'])
+    run_makemask_ring(paths_cube, multiplier_radius_center=multiplier, width='beam', col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
+    
+    if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
+        pass
+    else:
+        for name_cube in names_cube:
+            dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(masksuffix)
+        if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
+        multirun_main(names_cube, num_cores=num_cores)
+        
+    return
+
+def do_angles(angle, angle_width):
+            
+    dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
+    masksuffix = '_A{:0>3}_W{:0>3}'.format(angle,angle_width)
+    if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
+        pass
+    else:
+        for path_cube in paths_cube:
+            
+            makemask_angle(path_cube, angle_center=angle, angle_width=angle_width, 
+                        path_df=path_data/'catalog/cat_diameters.csv',
+            )
+        for name_cube in names_cube:
+            dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(masksuffix)
+        if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
+        multirun_main(names_cube, num_cores=num_cores)
+    return
+        
+def do_angles_O05(angle,angle_width):
+    run_makemask_ellipse(paths_cube, multiplier_radius=0.5, col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
+    
+    dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
+    masksuffix = '_A{:0>3}_W{:0>3}'.format(angle,angle_width)
+    if os.path.exists(path_output/'info_stacked{}_O0.5r25_GFIT.csv'.format(dict_glob['suffix'])):
+        pass
+    else:
+        for path_cube in paths_cube:
+            
+            makemask_angle(path_cube, angle_center=angle, angle_width=angle_width, 
+                        path_df=path_data/'catalog/cat_diameters.csv',
+            # )
+                        path_mask=path_cube.parent/'mask/mask_O0.5r25.fits')
+        for name_cube in names_cube:
+            dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(masksuffix)
+        if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
+        dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}_O0.5r25'.format(angle,angle_width)
+        multirun_main(names_cube, num_cores=num_cores)
+    return
+    
+def do_angles_O10(angle,angle_width):
+    run_makemask_ellipse(paths_cube, multiplier_radius=1.0, col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
+    
+    dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
+    masksuffix = '_A{:0>3}_W{:0>3}'.format(angle,angle_width)
+    if os.path.exists(path_output/'info_stacked{}_O1.0r25_GFIT.csv'.format(dict_glob['suffix'])):
+        pass
+    else:
+        for path_cube in paths_cube:
+        
+            makemask_angle(path_cube, angle_center=angle, angle_width=angle_width, 
+                        path_df=path_data/'catalog/cat_diameters.csv',
+                        path_mask=path_cube.parent/'mask/mask_O1.0r25.fits')
+        
+        
+        for name_cube in names_cube:
+            dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(masksuffix)
+        if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
+        
+        dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}_O1.0r25'.format(angle,angle_width)
+        # dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
+        
+        multirun_main(names_cube, num_cores=num_cores)
+        
+    return
+
+
+path_data = Path('/home/mskim/workspace/research/data')
 homedirs = [
     # path_data/'LITTLE_THINGS_halfbeam',
     # path_data/'THINGS_halfbeam',
@@ -258,10 +385,15 @@ homedirs = [
     # path_data+'/test_resolution/20arcsec',
     # path_data/'test_resolution/30arcsec',
     # path_data/'test_chanres/2.58kms',
-    path_data/'test_chanres/5.16kms',
-    path_data/'test_chanres/10.3kms',
+    # path_data/'test_chanres/5.16kms',
+    # path_data/'test_chanres/10.3kms',
     # path_data+'/Rory/RPfiles',
+    # '/home/mskim/workspace/research/data/AVID_halfbeam'
     
+    # '/home/mskim/workspace/research/data/test'
+    # '/home/mskim/workspace/research/data/test_LBFGSB'
+    '/home/mskim/workspace/research/data/test_neldermead'
+    # '/home/mskim/workspace/research/data/test_SNR3_snch_sbbw'
 ]
 
 nametype_cube = 'cube.fits'
@@ -269,43 +401,54 @@ nametype_galaxy = '*'
 # nametype_galaxy = '15,2,0.4'
 # nametype_galaxy = 'DDO70'
 
-# multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.6,2.0]#, 0.1,0.3,0.5,0.7,0.9,1.1,1.3,1.4,1.5,1.7,1.8,1.9]#, 2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9,3.0]
 # multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.6,2.0, 0.1,0.3,0.5,0.7,0.9,1.1,1.3,1.4,1.5,1.7,1.8,1.9]#, 2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9,3.0]
-# multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.6,2.0]
+# multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2.0]
 # multipliers = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5]
+
 # multipliers = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
-multipliers = [1.0]
+multipliers = [0.9]
 
 # multipliers = [0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
 
 # multipliers = [1.2,1.6,2.0, 0.3,0.5,0.7,0.9,1.1,1.3,1.4,1.5,1.7,1.8,1.9, 2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9,3.0]
 # multipliers = [2.9,3.0]
 
-col_radius = 'r25';      radtag='r25'
-# col_radius = 'RHI(kpc)'; radtag='RHI'
+# multipliers = multipliers[::2]
+# multipliers = np.flip(multipliers[1::2])
+# multipliers = np.flip(multipliers)
 
-snlim_peak = 3.0
+# col_radius = 'r25';      radtag='r25'
+col_radius = 'RHI(kpc)'; radtag='RHI'
+
+suffix = '_'
+
+snlim_peak    = 3
 key_classify = '3'
+# suffix  += 'SNR2.5_'
 
-num_cores = 5
+use_secondary_vf = True; #suffix+='VFsec_'
+# use_secondary_vf = False
 
-remove_temp        = 0
+truth_from_resampling = True
+
+num_cores = 30
+
+remove_temp        = 1
 overwrite_classify = 1
 bool_do_clfy       = 1
 
-bool_overwrite = 0
+bool_overwrite = 1
 
-bool_do_whole  = 0
-bool_do_inner  = 1
+bool_do_whole  = 1
+bool_do_inner  = 0
 bool_do_outer  = 0
 bool_do_rings  = 0
-# bool_do_angles = 1; angles=[0,90,180,270, 30,60, 120,150, 210,240, 300,330]
-# bool_do_angles = 1; angles=[30,60, 120,150, 210,240, 300,330]
 
 bool_do_angles = 0
-angles=np.flip([0,15,30,45,60,75,90,105,120,135,150,165,180,195,210,225,240,255,270,285,300,315,330,345])
-# angles=[120,135,150,165,180,195,210,225,240,255,270,285,300,315,330,345]
-# bool_do_angles = 1; angles=[270]
+angles=[0,15,30,45,60,75,90,105,120,135,150,165,180,195,210,225,240,255,270,285,300,315,330,345]
+
+# angles = angles[::2]
+# angles = np.flip(angles[1::2])
 
 bool_pack_output = 0
 
@@ -331,9 +474,8 @@ dict_glob['nsample_resample'] = nsample_resample
 dict_glob['mode'] = 'baygaud'
 # dict_glob['mode'] = 'hermite'
 # dict_glob['vdisp_low_intrinsic'] = 1.5
-dict_glob['vdisp_low_intrinsic'] = 5
-
-
+dict_glob['vdisp_low_intrinsic'] = 0
+dict_glob['radtag'] = radtag
 
 timei = time.time()
 
@@ -342,6 +484,9 @@ for homedir in homedirs:
     homedir = Path(homedir)
     path_output = None
     # path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
+    
+    # path_output = homedir.parent / f'{homedir.name}_2VFT'
+    # path_output = homedir.parent / f'{homedir.name}_2VFonly'
     
     paths_cube = glob.glob(str(homedir / f'{nametype_galaxy}/{nametype_cube}'))
     names_cube = []
@@ -370,7 +515,7 @@ for homedir in homedirs:
             dict_glob[name_cube]['path_hermite']=wdir/'hermite.npy'
         dict_glob[name_cube]['path_vf_secondary']=wdir/'cube_mom1.fits'
     
-    suffix = '_'
+    
     dict_glob['suffix'] = suffix
     if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
     dict_glob['seed'] = str(time.time()).split(".")[-1]
@@ -405,107 +550,22 @@ for homedir in homedirs:
         else: multirun_main(names_cube, num_cores=num_cores)
     
     if bool_do_inner:
-    
-        for multiplier in multipliers:
-            
-            dict_glob['suffix'] = suffix+'I{}{}'.format(multiplier,radtag)
-
-            if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
-            # if False:
-                pass
-            else:
-                run_makemask_ellipse(paths_cube, multiplier_radius=multiplier, col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
-                for name_cube in names_cube:
-                    dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(dict_glob['suffix'])
-                if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
-                multirun_main(names_cube, num_cores=num_cores)
+        for multiplier in multipliers: do_inner(multiplier)
     
     if bool_do_outer:
-        for multiplier in multipliers:
-            
-            dict_glob['suffix'] = suffix+'O{}{}'.format(multiplier,radtag)
-            run_makemask_ellipse(paths_cube, multiplier_radius=multiplier, col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
-            
-            # if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
-            if False:
-                pass
-            else:
-                for name_cube in names_cube:
-                    dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(dict_glob['suffix'])
-                if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
-                multirun_main(names_cube, num_cores=num_cores)
+        for multiplier in multipliers: do_outer(multiplier)
                 
     if bool_do_rings:
-        for multiplier in multipliers:
-            
-            dict_glob['suffix'] = suffix+'R{}{}'.format(multiplier,radtag)
-            run_makemask_ring(paths_cube, multiplier_radius_center=multiplier, width=0.1, col_radius=col_radius, path_df=path_data/'catalog/cat_diameters.csv')
-            
-            if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
-                pass
-            else:
-                for name_cube in names_cube:
-                    dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(dict_glob['suffix'])
-                if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
-                multirun_main(names_cube, num_cores=num_cores)
+        for multiplier in multipliers: do_rings(multiplier)
                 
     if bool_do_angles:
-        for angle in angles:
-            
-            # angle_width = 30
-            angle_widths = [180]
-            for angle_width in angle_widths:
-            
-                dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
-                if os.path.exists(path_output/'info_stacked{}_GFIT.csv'.format(dict_glob['suffix'])):
-                    pass
-                else:
-                    for path_cube in paths_cube:
-                        
-                        makemask_angle(path_cube, angle_center=angle, angle_width=angle_width, 
-                                    path_df=path_data/'catalog/cat_diameters.csv',
-                        )
-                    for name_cube in names_cube:
-                        dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(dict_glob['suffix'])
-                    if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
-                    multirun_main(names_cube, num_cores=num_cores)
-                
-                
-                dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
-                if os.path.exists(path_output/'info_stacked{}_O0.5r25_GFIT.csv'.format(dict_glob['suffix'])):
-                    pass
-                else:
-                    for path_cube in paths_cube:
-                        
-                        makemask_angle(path_cube, angle_center=angle, angle_width=angle_width, 
-                                    path_df=path_data/'catalog/cat_diameters.csv',
-                        # )
-                                    path_mask=path_cube.parent/'mask/mask_O0.5r25.fits')
-                    for name_cube in names_cube:
-                        dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(dict_glob['suffix'])
-                    if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
-                    dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}_O0.5r25'.format(angle,angle_width)
-                    multirun_main(names_cube, num_cores=num_cores)
-                
-                dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
-                if os.path.exists(path_output/'info_stacked{}_O1.0r25_GFIT.csv'.format(dict_glob['suffix'])):
-                    pass
-                else:
-                    for path_cube in paths_cube:
-                    
-                        makemask_angle(path_cube, angle_center=angle, angle_width=angle_width, 
-                                    path_df=path_data/'catalog/cat_diameters.csv',
-                                    path_mask=path_cube.parent/'mask/mask_O1.0r25.fits')
-                    
-                    
-                    for name_cube in names_cube:
-                        dict_glob[name_cube]['path_mask'] = dict_glob[name_cube]['path_cube'].parent/'mask/mask{}.fits'.format(dict_glob['suffix'])
-                    if dict_glob['mode']=='hermite': dict_glob['suffix']+='_her' 
-                    
-                    dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}_O1.0r25'.format(angle,angle_width)
-                    # dict_glob['suffix'] = suffix+'A{:0>3}_W{:0>3}'.format(angle,angle_width)
-                    
-                    multirun_main(names_cube, num_cores=num_cores)
+        for angle in angles: do_angles(angle,90)
+        for angle in angles: do_angles_O05(angle,90)
+        for angle in angles: do_angles_O10(angle,90)
+        
+        # for angle in angles: do_angles(angle,180)
+        # for angle in angles: do_angles_O05(angle,180)
+        # for angle in angles: do_angles_O10(angle,180)
     
     try:
         shutil.rmtree(dict_glob['path_output']/f'temp_{dict_glob["seed"]}')

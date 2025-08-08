@@ -444,6 +444,7 @@ class Plotfit:
         A1,V1,S1,B1 = self.df.loc[0,['A1','V1','S1','B1']]
         
         residual = yy - (gauss(xx, A1,V1,S1)+B1)
+        self.residual_1GFIT = residual
         
         N1   = np.std(residual)
         SNR1 = A1/N1
@@ -475,11 +476,13 @@ class Plotfit:
             'V21':dict_1Gfit['V1'],
             'V22':dict_1Gfit['V1'],
             'S21':dict_1Gfit['S1'],
+            # 'S21':self.dispmin+0.1,
+            # 'S21':dict_1Gfit['S1']*0.5+0.1,
             'S22':dict_1Gfit['S1']+0.1,
             'B2' :dict_1Gfit['B1']
         }
         
-        if dict_guess['S21']>dict_guess['S22']: dict_guess['S21'] = dict_guess['S22']-0.001
+        if dict_guess['S21']>dict_guess['S22']: dict_guess['S21'] = (dict_1Gfit['S1']+self.dispmin)/2.
         
         names_param = np.array([key for key, status in self.dict_params.items() if status == 'free'])
         guess       = np.array([dict_guess[param] for param in names_param])
@@ -505,10 +508,14 @@ class Plotfit:
             'A22':np.array([-0.001*self.ymax, self.ymax*1.5]), #upbnd_Amp]),#np.max([A1,self.ymax])]),
             'V21':np.array([-5*S1,5*S1]),
             'V22':np.array([-5*S1,5*S1]),
-            'S21':np.array([self.dispmin, self.dispmax]),
-            'S22':np.array([self.dispmin, self.dispmax]),
-            # 'B2' :np.array([-0.3*self.ymax,0.3*self.ymax])
+            # 'S21':np.array([self.dispmin, self.dispmax]),
+            # 'S22':np.array([self.dispmin, self.dispmax]),
+            
+            'S21':np.array([self.dispmin, S1*3]),
+            'S22':np.array([self.dispmin, S1*3]),
+            
             'B2' :np.array([B1-N1,B1+N1])
+            # 'B2' :np.array([-self.ymax*0.5, self.ymax*0.5])
         }
         
         if np.diff(dict_bound['S21'])<0:
@@ -595,6 +602,7 @@ class Plotfit:
         model_totl = model_narw+model_brod
         
         residual = self.y - model_totl
+        self.residual_2GFIT = residual
         
         self.df['SNR2'] = (A21+A22)/np.nanstd(residual)
         self.df['N2']   = np.nanstd(residual)
@@ -649,9 +657,8 @@ class Plotfit:
         
         guess_1G = self.df.loc[0,['A1','V1','S1','B1']]
         N1 = self.df['N1'][0]
-        
+                
         if pbar_resample:
-            
             pbar = tqdm(total=nsample)
             
         trueiter = 0
@@ -661,7 +668,8 @@ class Plotfit:
             
             while True:
                 # self.x_w_noise = xx     + np.random.normal(0,self.chansep/2,len(xx))
-                y_w_noise = self.y + np.random.normal(0,self.df['N2'][0],len(self.y))
+                # y_w_noise = self.y + np.random.normal(0,self.df['N2'][0],len(self.y))
+                y_w_noise = self.y + np.random.choice(self.residual_2GFIT, len(self.y), replace=True)
                 ymax = y_w_noise.max()
                 
                 gmodel = self.gmodel
@@ -672,10 +680,13 @@ class Plotfit:
                 
                 gmodel.update_bound('A21',np.array([-0.001, 1.5], dtype=np.float64)*ymax)
                 gmodel.update_bound('A22',np.array([-0.001, 1.5], dtype=np.float64)*ymax)
-                if self.dict_params['B2']=='free':
-                    gmodel.update_bound('B2',np.array([B1-N1,B1+N1],dtype=np.float64))
+                # if self.dict_params['B2']=='free':
+                #     gmodel.update_bound('B2',np.array([B1-N1,B1+N1],dtype=np.float64))
                 
-                res = minimize(gmodel.log_prob_guess, guess, method='Nelder-Mead', tol=1e-6)
+                res = minimize(gmodel.log_prob_guess, guess, method='Nelder-Mead', tol=1e-8)
+                # print(gmodel.names_param)
+                # print(gmodel.return_bounds_list())
+                # res = minimize(gmodel.log_prob_guess, guess, bounds=gmodel.return_bounds_list(), method='Powell', tol=1e-8)
                 trueiter+=1
                 if np.isfinite(res.fun):
                     S1s[j] = S1
@@ -709,39 +720,45 @@ class Plotfit:
         sns = resampled[:,np.argwhere(self.params_2gfit=='S21')[0]]
         sbs = resampled[:,np.argwhere(self.params_2gfit=='S22')[0]]
         Ans = gaussian_area(resampled[:,np.argwhere(self.params_2gfit=='A21')[0]], sns)
-        Abs = gaussian_area(resampled[:,np.argwhere(self.params_2gfit=='A21')[0]], sbs)
+        Abs = gaussian_area(resampled[:,np.argwhere(self.params_2gfit=='A22')[0]], sbs)
         Ats = Ans+Abs
         
         if self.truth_from_resampling:
+            print(f'[Plotfit {self.name_cube}] truth_from_resampling is True; filling df with resampled values')
             for param in gmodel.names_param:
-                print(param)
-                self.df[param] = np.mean(resampled[:,np.argwhere(self.params_2gfit==param)[0]])
+                self.df[param] = np.median(sort_outliers(resampled[:,np.argwhere(self.params_2gfit==param)[0]]))
         
         A21,A22,S21,S22 = self.df.loc[0,['A21','A22','S21','S22']]
         An,Ab = gaussian_area(A21,S21), gaussian_area(A22,S22)
+        
         self.df_params[  'sn'] = S21
         self.df_params[  'sb'] = S22
         self.df_params[  'An'] = An
         self.df_params[  'Ab'] = Ab
         self.df_params[  'At'] = An+Ab
         
-        self.df_params['e_S1'] = np.nanstd(sort_outliers(S1s))
+        self.df_params['e_S1'] = np.nanstd(S1s)
         
-        self.df_params['e_sn'] = np.nanstd(sort_outliers(sns))
-        self.df_params['e_sb'] = np.nanstd(sort_outliers(sbs))
-        self.df_params['e_An'] = np.nanstd(sort_outliers(Ans))
-        self.df_params['e_Ab'] = np.nanstd(sort_outliers(Abs))
-        self.df_params['e_At'] = np.nanstd(sort_outliers(Ats))
+        self.df_params['e_sn'] = np.nanstd(sns)
+        self.df_params['e_sb'] = np.nanstd(sbs)
+        self.df_params['e_An'] = np.nanstd(Ans)
+        self.df_params['e_Ab'] = np.nanstd(Abs)
+        self.df_params['e_At'] = np.nanstd(Ats)
         
-        self.df_params[  'sn/sb'] = self.df_params['sn'][0]/self.df_params['sb'][0]
-        self.df_params[  'An/At'] = self.df_params['An'][0]/self.df_params['At'][0]
-        self.df_params['e_sn/sb'] = np.nanstd(sort_outliers(sns/sbs))
-        self.df_params['e_An/At'] = np.nanstd(sort_outliers(Ans/Ats))
-        
-        self.df_params['log(sb-sn)']   = np.log10(self.df_params['sb'][0]-self.df_params['sn'][0])
-        self.df_params['e_log(sb-sn)'] = np.nanstd(sort_outliers(np.log10(sbs-sns)))
-        
-        
+        if self.truth_from_resampling:
+            snsbs = sns/sbs
+            snsbs = snsbs[snsbs<0.9]
+            self.df_params['sn/sb']      = np.median(sort_outliers(snsbs))
+            self.df_params['An/At']      = np.median(sort_outliers(Ans/Ats))
+            self.df_params['log(sb-sn)'] = np.nanmedian(sort_outliers(np.log10(sbs-sns)))
+        else:
+            self.df_params[  'sn/sb']    = self.df_params['sn'][0]/self.df_params['sb'][0]
+            self.df_params[  'An/At']    = self.df_params['An'][0]/self.df_params['At'][0]
+            self.df_params['log(sb-sn)'] = np.log10(self.df_params['sb'][0]-self.df_params['sn'][0])
+            
+        self.df_params['e_sn/sb'] = np.nanstd(snsbs)
+        self.df_params['e_An/At'] = np.nanstd(Ans/Ats)
+        self.df_params['e_log(sb-sn)'] = np.nanstd(np.log10(sbs-sns))
         
         # fillstat('sn', sns)
         # fillstat('sb', sbs)
@@ -848,8 +865,11 @@ class Plotfit:
         # self.dispmin = np.min(list_disp)
         # self.dispmax = np.max(list_disp)
         
-        self.dispmin = self.chansep/2.355  # np.sqrt(self.vdisp_low_intrinsic**2 + (self.chansep/2.355)**2)
-        self.dispmax = 200 #np.max(self.list_disp+self.e_list_disp)
+        self.dispmin = self.chansep/2.355 * 3
+        self.dispmax = self.bandwidh/2.355
+        
+        # self.dispmin = self.chansep/2.355  # np.sqrt(self.vdisp_low_intrinsic**2 + (self.chansep/2.355)**2)
+        # self.dispmax = np.max(self.list_disp) #self.bandwidh/2.355
         
         # if self.dispmin<self.chansep/4.: self.dispmin = self.chansep/4.
         

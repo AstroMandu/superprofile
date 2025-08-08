@@ -126,4 +126,9 @@ class Gmodel:
     def log_prob_guess(self, params):
         # param_dict = self.array_to_dict_guess(params)
         # return -1 * self.log_prob(param_dict)
+        lp = self.log_prob(params)
+        if ~np.isfinite(lp): return 1e20
         return -1 * self.log_prob(params)
+
+    def return_bounds_list(self):
+        return [self.dict_bound[key] for key in self.names_param]
