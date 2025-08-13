@@ -107,7 +107,7 @@ def job(js):
         #EVALUATION
         if res.x[2]<dict_glob['disp_lower']:
             continue
-        if res.x[0]/dict_glob['noise']<2:
+        if res.x[0]/dict_glob['noise']<3:
             continue
 
         df.loc[i,'A']      = res.x[0]
@@ -188,6 +188,7 @@ def main(n_cores, path_cube, path_velo, path_disp, path_mask=None, vdisp_intrins
     # SETUP =============================================================================
     path_cube = Path(path_cube)
     wdir = path_cube.parent # Working directory
+    name_cube = wdir.name
     
     hedr_cube = fits.getheader(path_cube) # Header, cube
     data_cube = fits.getdata(path_cube) # Data, cube
@@ -262,7 +263,7 @@ def main(n_cores, path_cube, path_velo, path_disp, path_mask=None, vdisp_intrins
 
     # Distribute to cores the job, split using lists declared above
     with tqdm(total=len(lists)) as pbar:
-        for _ in tqdm(pool.imap_unordered(job, lists)):
+        for _ in tqdm(pool.imap_unordered(job, lists), desc=name_cube):
             pbar.update()
 
     pool.close()
@@ -314,12 +315,11 @@ if __name__=='__main__':
     # paths_cube = [Path('/home/mskim/workspace/research/data/test/VCC1778/cube.fits')]
     # paths_cube = [Path('/home/mskim/workspace/research/data/AVID_halfbeam/VCC169/cube.fits')]
     
-    paths_cube = Path('/home/mskim/workspace/research/data/AVID_halfbeam').glob('*/cube.fits')
+    paths_cube = Path('/home/mskim/workspace/research/data/AVID').glob('*/cube.fits')
     
     for path_cube in paths_cube:
     
         wdir = path_cube.parent
-        
         galname = wdir.name
         
         if os.path.exists(wdir/'cube_mom1.fits')==False: 
@@ -331,4 +331,5 @@ if __name__=='__main__':
                 wdir/'cube.fits',
                 path_velo=wdir/'cube_mom1.fits',
                 path_disp=wdir/'cube_mom2.fits',
+                path_mask=wdir/'segmts_merged_n_classified.2/sgfit/sgfit.G3_1.1.fits',
                 vdisp_intrinsic=0*(u.km/u.s))

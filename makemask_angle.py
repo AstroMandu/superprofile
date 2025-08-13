@@ -10,7 +10,7 @@ from astropy.wcs import WCS
 from photutils.aperture import EllipticalAperture
 from regions import EllipsePixelRegion, PixCoord
 
-def makemask(path_cube, angle_center, angle_width, path_df, path_mask=None):
+def makemask(path_cube, angle_center, angle_width, path_df, path_mask=None, savename=None):
     
     df = pd.read_csv(path_df, sep='\s+')
 
@@ -69,7 +69,8 @@ def makemask(path_cube, angle_center, angle_width, path_df, path_mask=None):
     if os.path.exists(wdir/'mask')==False:
         os.mkdir(wdir/'mask')
     
-    savename = wdir/'mask/mask_A{:0>3}_W{:0>3}.fits'.format(angle_center, angle_width)
+    if savename is None:
+        savename = wdir/'mask/mask_A{:0>3}_W{:0>3}.fits'.format(angle_center, angle_width)
     
     fits.writeto(savename, mask_combined, overwrite=True)
     

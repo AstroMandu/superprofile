@@ -14,6 +14,7 @@ from spectral_cube.io.core import StokesWarning
 from tqdm import tqdm
 
 
+
 warnings.simplefilter("ignore", StokesWarning)
 
 
@@ -155,6 +156,8 @@ class ShiftnStack:
         
         for coord in dict_data.keys():
             for g in dict_data[coord].keys():
+                
+                if 'psnr' not in dict_data[coord][g]: continue
             
                 psnr = dict_data[coord][g]['psnr']
                 nois = dict_data[coord][g]['nois']
@@ -195,6 +198,7 @@ class ShiftnStack:
             for g in dict_cord.keys():
                 
                 dict_pg = dict_cord[g]
+                if 'velo' not in dict_pg: continue
                 # if self.filter_genuine(dict_pg)==False: continue
                 
                 data_subed = np.float64(data_cube[:,y,x].copy())
@@ -203,6 +207,7 @@ class ShiftnStack:
                 for gother in dict_cord.keys():
                     if(g==gother): continue
                     dict_pgother = dict_cord[gother]
+                    if 'velo' not in dict_pgother: continue
                     
                     model = gauss(self.spec_axis, dict_pgother['ampl'], dict_pgother['velo'], dict_pgother['disp'])+dict_pgother['bkgr']
                     data_subed -= model
@@ -279,11 +284,13 @@ class ShiftnStack:
         if stack_secondary:
             
             import os
+            
+            
             if os.path.exists(self.path_cube.parent/'cube_mom2.fits'):
                 data_mom2 = fits.getdata(self.path_cube.parent/'cube_mom2.fits')/1000.
             else: data_mom2 = None
             
-
+            data_vf_secondary = np.where(data_mom2<self.chansep/2.355*3, np.nan, data_vf_secondary)
             
             for y,x in np.argwhere((np.isfinite(data_mask)) & (np.isfinite(data_vf_secondary))):
                 shift = data_vf_secondary[y,x]/self.chansep
@@ -298,6 +305,8 @@ class ShiftnStack:
                     count+=1
                     
                 # import pylab as plt
+                # import matplotlib
+                # matplotlib.use('TkAgg')
                 # fig, axs = plt.subplots(nrows=3)
                 # plt.rcParams['hatch.linewidth']=4
                 # ax=axs[0]
@@ -307,6 +316,7 @@ class ShiftnStack:
                 # ax.step(self.spec_axis, data_cube[:,y,x],color='gray',where='mid')
                 # ax.fill_between(self.spec_axis, data_cube[:,y,x], step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
                 # ax.axvline(data_vf_secondary[y,x])
+                # ax.axvspan(data_vf_secondary[y,x]-3*data_mom2[y,x],data_vf_secondary[y,x]+3*data_mom2[y,x], color='gray',alpha=0.1)
 
                 # fig.suptitle("({}, {})".format(x, y))
                 # ax.set_xlabel(r"Velocity [km $s^{-1}]$", color='white', fontsize=20, labelpad=-3)
@@ -326,7 +336,7 @@ class ShiftnStack:
                 # ax.fill_between(xx*np.abs(self.chansep), yy, step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
                 
                 # plt.show()
-                # plt.close(fig)
+                # # plt.close(fig)
                 
         
         yy  = yy * (u.Jy/u.beam)

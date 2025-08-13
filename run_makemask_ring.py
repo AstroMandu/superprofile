@@ -39,12 +39,14 @@ def run_makemask(paths_cube, multiplier_radius_center, width, col_radius,
         pa = df_diam.loc[loc, 'PA'] * u.deg
 
         # Beam width calculation
-        if width == 'beam' or width == 'halfbeam':
+        if width == 'beam' or width == 'halfbeam' or width=='2*beam':
             beam = Beam.from_fits_header(header)
             bmean = (beam.major + beam.minor) / 2.0
             pm = bmean / 2.0
             if width == 'halfbeam':
                 pm = pm / 2.0
+            if width =='2*beam':
+                pm = pm * 2.0
         else:
             pm = None  # Will be set later
 

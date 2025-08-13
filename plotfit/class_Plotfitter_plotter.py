@@ -45,8 +45,8 @@ class Plotter:
         
         if sampler is not None:
             tau = sampler.get_autocorr_time(tol=0)
-            self.burnin = int(2   * np.max(tau))
-            self.thin   = int(0.5 * np.min(tau))
+            self.burnin = int(2   * np.nanmax(tau))
+            self.thin   = int(0.5 * np.nanmin(tau))
             
         self.names_param = np.array(gmodel.names_param)
         
