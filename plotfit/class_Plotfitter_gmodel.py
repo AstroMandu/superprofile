@@ -1,5 +1,5 @@
 import numpy as np
-from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus
+from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped
 from pprint import pprint
 
 class Gmodel:
@@ -135,7 +135,7 @@ class Gmodel:
         if self.has_B2:  B2=params[self.argwhere_B2]   
         else: B2=self.B1
         uA21,uA22 = _softplus(A21), _softplus(A22)
-        uS21,uS22 = _softplus(S21), _softplus(S22)
+        uS21,uS22 = _sigmoid_mapped(S21,self.dict_bound['S21'][0],self.S1), _softplus(S22)
         uS22 += uS21
         logl = self.log_L_2G(uA21,uA22,V21,V22,uS21,uS22,B2)
         if not np.isfinite(logl):

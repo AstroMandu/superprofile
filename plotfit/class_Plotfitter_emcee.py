@@ -45,7 +45,8 @@ from .subroutines_Plotfitter import (
     get_asymmetry_residuals,
     get_mode,
     sort_outliers,
-    _softplus, _inv_softplus, _idx
+    _softplus, _inv_softplus, _idx,
+    _sigmoid_mapped, _inv_sigmoid_mapped
 )
 
 
@@ -166,39 +167,19 @@ class Plotfit:
     # -----------------------------
     def _init_main_df(self) -> pd.DataFrame:
         cols = [
-            "SNR1",
-            "SNR2",
-            "N1",
-            "N2",
-            "F-test",
-            "F-crit",
+            "SNR1","SNR2",
+            "N1","N2",
+            "F-test","F-crit",
             # 1G params
-            "B1",
-            "A1",
-            "V1",
-            "S1",
+            "B1","A1","V1","S1",
             # 2G params + errors (asymmetric percentiles)
-            "B2",
-            "e-_B2",
-            "e+_B2",
-            "A21",
-            "e-_A21",
-            "e+_A21",
-            "A22",
-            "e-_A22",
-            "e+_A22",
-            "V21",
-            "e-_V21",
-            "e+_V21",
-            "V22",
-            "e-_V22",
-            "e+_V22",
-            "S21",
-            "e-_S21",
-            "e+_S21",
-            "S22",
-            "e-_S22",
-            "e+_S22",
+            "B2","e-_B2","e+_B2",
+            "A21","e-_A21","e+_A21",
+            "A22","e-_A22","e+_A22",
+            "V21","e-_V21","e+_V21",
+            "V22","e-_V22","e+_V22",
+            "S21","e-_S21","e+_S21",
+            "S22","e-_S22","e+_S22",
         ]
         df = pd.DataFrame({"Name": [self.name_cube], **{c: [np.nan] for c in cols}})
         return df
@@ -261,7 +242,7 @@ class Plotfit:
                 params_mapped = params_dict.copy()
                 params_dict['A21'] = _softplus(params_dict['A21'])
                 params_dict['A22'] = _softplus(params_dict['A22'])
-                params_dict['S21'] = _softplus(params_dict['S21'])
+                params_dict['S21'] = _sigmoid_mapped(params_dict['S21'], gmodel.dict_bound['S21'][0], gmodel.dict_bound['S21'][1])
                 params_dict['S21'] = _softplus(params_dict['S22']) + params_dict['S21']
             else:
                 params_mapped = gmodel.array_to_dict_guess(gmodel.map_params(params).flatten())
@@ -500,7 +481,7 @@ class Plotfit:
                 iS21,iS22 = _idx(names,'S21'),_idx(names,'S22')
                 flat_samples[:,iA21] = _softplus(flat_samples[:,iA21])
                 flat_samples[:,iA22] = _softplus(flat_samples[:,iA22])
-                flat_samples[:,iS21] = _softplus(flat_samples[:,iS21])
+                flat_samples[:,iS21] = _sigmoid_mapped(flat_samples[:,iS21],self.dispmin,self.df.loc[0,'S1'])
                 flat_samples[:,iS22] = _softplus(flat_samples[:,iS22]) + flat_samples[:,iS21]
                 
         if self.statistics == "median":
@@ -773,7 +754,7 @@ class Plotfit:
             "A22": np.array([-0.001 * self.ymax, self.ymax * 1.5], dtype=float),
             "V21": np.array([-5 * S1, 5 * S1], dtype=float),
             "V22": np.array([-5 * S1, 5 * S1], dtype=float),
-            "S21": np.array([self.dispmin, self.dispmax], dtype=float),
+            "S21": np.array([self.dispmin, S1], dtype=float),
             "S22": np.array([self.dispmin, self.dispmax], dtype=float),
             # "S21": np.array([self.dispmin, S1], dtype=float),
             # "S21": np.array([0, S1], dtype=float),
@@ -831,7 +812,7 @@ class Plotfit:
             iA21,iA22 = _idx(gmodel.names_param,'A21'),_idx(gmodel.names_param,'A22')
             iS21,iS22 = _idx(gmodel.names_param,'S21'),_idx(gmodel.names_param,'S22')
             guess[iA21],guess[iA22] = _inv_softplus(guess[iA21]),_inv_softplus(guess[iA22])
-            guess[iS21] = _inv_softplus(guess[iS21])
+            guess[iS21] = _inv_sigmoid_mapped(guess[iS21],self.dispmin,S1)
             guess[iS22] = _inv_softplus(guess[iS22]) - guess[iS21]
             pos = guess + 0.1*np.random.randn(nwalkers,ndim)
             log_prob_2G = gmodel.log_prob_2G_unconstrained
@@ -862,19 +843,19 @@ class Plotfit:
         self._reset_autocorr_buffers(self.maxiter)
         
         for state in sampler.sample(pos, iterations=self.maxiter):
-            bad = ~np.isfinite(state.log_prob)
-            if np.any(bad):
-                bad_coords = state.coords[bad]
-                # Map & print the bad walkers
-                pos_mapped = bad_coords.copy()
-                if self.unconstrained:
-                    pos_mapped[:, iA21] = _softplus(pos_mapped[:, iA21])
-                    pos_mapped[:, iA22] = _softplus(pos_mapped[:, iA22])
-                    pos_mapped[:, iS21] = _softplus(pos_mapped[:, iS21])
-                    pos_mapped[:, iS22] = _softplus(pos_mapped[:, iS22]) + pos_mapped[:, iS21]
-                for p_map, p_raw in zip(pos_mapped, bad_coords):
-                    print(gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
-                break  # stop immediately so you can debug
+            # bad = ~np.isfinite(state.log_prob)
+            # if np.any(bad):
+            #     bad_coords = state.coords[bad]
+            #     # Map & print the bad walkers
+            #     pos_mapped = bad_coords.copy()
+            #     if self.unconstrained:
+            #         pos_mapped[:, iA21] = _softplus(pos_mapped[:, iA21])
+            #         pos_mapped[:, iA22] = _softplus(pos_mapped[:, iA22])
+            #         pos_mapped[:, iS21] = _softplus(pos_mapped[:, iS21])
+            #         pos_mapped[:, iS22] = _softplus(pos_mapped[:, iS22]) + pos_mapped[:, iS21]
+            #     for p_map, p_raw in zip(pos_mapped, bad_coords):
+            #         print(gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
+            #     break  # stop immediately so you can debug
             
             if sampler.iteration % self.testlength:
                 continue
@@ -949,7 +930,7 @@ class Plotfit:
             iA21,iA22 = _idx(names_param,'A21'),_idx(names_param,'A22')
             iS21,iS22 = _idx(names_param,'S21'),_idx(names_param,'S22')
             guess[iA21],guess[iA22] = _inv_softplus(guess[iA21]),_inv_softplus(guess[iA22])
-            guess[iS21] = _inv_softplus(guess[iS21])
+            guess[iS21] = _inv_sigmoid_mapped(guess[iS21],self.dispmin,self.df.loc[0,'S1'])
             guess[iS22] = _inv_softplus(guess[iS22]) - guess[iS21]
         
         pbar = tqdm(total=nsample) if pbar_resample else None
@@ -974,6 +955,7 @@ class Plotfit:
                 # Update bounds that depend on data scale
                 gmodel.update_bound("A21", np.array([-0.001, 1.5], dtype=np.float64) * ymax)
                 gmodel.update_bound("A22", np.array([-0.001, 1.5], dtype=np.float64) * ymax)
+                gmodel.update_bound("S21", np.array([self.dispmin,S1], dtype=np.float64) * ymax)
                 # If B2 were free, could also update bounds using N1
                 # gmodel.update_bound("B2", np.array([B1 - N1, B1 + N1], dtype=np.float64))
 
@@ -999,7 +981,7 @@ class Plotfit:
         if self.unconstrained:
             resampled[:,iA21] = _softplus(resampled[:,iA21])
             resampled[:,iA22] = _softplus(resampled[:,iA22])
-            resampled[:,iS21] = _softplus(resampled[:,iS21])
+            resampled[:,iS21] = _sigmoid_mapped(resampled[:,iS21],self.dispmin,S1s)
             resampled[:,iS22] = _softplus(resampled[:,iS22]) + resampled[:,iS21]
 
         self.resampled = resampled
