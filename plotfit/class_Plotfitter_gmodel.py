@@ -1,5 +1,5 @@
 import numpy as np
-from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit
+from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus
 from pprint import pprint
 
 class Gmodel:
@@ -101,6 +101,14 @@ class Gmodel:
         if test_off_bounds(mapped): return -np.inf
         return self.log_L_1G(A1,V1,S1,B1)
     
+    def log_prob_1G_unconstrained(self, params):
+        A1,S1,B1 = params[self.argwhere_A1], params[self.argwhere_S1], params[self.argwhere_B1]
+        if self.has_V1: V1=params[self.argwhere_V1] 
+        else: V1=self.V1
+        uA1 = _softplus(A1)
+        uS1 = _softplus(S1)
+        return self.log_L_1G(uA1,V1,uS1,B1)
+    
     def log_prob_2G(self, params):
         A21,A22,S21,S22 = params[self.argwhere_A21],params[self.argwhere_A22],params[self.argwhere_S21],params[self.argwhere_S22]
         if self.has_V21: V21=params[self.argwhere_V21] 
@@ -114,6 +122,19 @@ class Gmodel:
         if self.test_2G_disp_order(S21,S22)==False: return -np.inf
         if self.test_2G_ampl(A21,A22,B2)==False:    return -np.inf
         return self.log_L_2G(A21,A22,V21,V22,S21,S22,B2)
+    
+    def log_prob_2G_unconstrained(self, params):
+        A21,A22,S21,S22 = params[self.argwhere_A21],params[self.argwhere_A22],params[self.argwhere_S21],params[self.argwhere_S22]
+        if self.has_V21: V21=params[self.argwhere_V21] 
+        else: V21=self.V1
+        if self.has_V22: V22=params[self.argwhere_V22] 
+        else: V22=V21
+        if self.has_B2:  B2=params[self.argwhere_B2]   
+        else: B2=self.B1
+        uA21,uA22 = _softplus(A21), _softplus(A22)
+        uS21,uS22 = _softplus(S21), _softplus(S22)
+        uS22 += uS21
+        return self.log_L_2G(uA21,uA22,V21,V22,uS21,uS22,B2)
 
     def array_to_dict_guess(self, params):
         return dict(zip(self.names_param, params))

@@ -7,7 +7,7 @@ from chainconsumer import Chain, ChainConsumer, Truth
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageFile
 
-from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area
+from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area, _idx, _softplus, _inv_softplus
 import pandas as pd
 import pylab as plt
 import time
@@ -16,7 +16,7 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 class Plotter:
     
-    def __init__(self, path_plot, name_cube, suffix, list_disp, df, df_params, gmodel=None, sampler=None, resampled=None):
+    def __init__(self, path_plot, name_cube, suffix, list_disp, df, df_params, gmodel=None, sampler=None, resampled=None, unconstrained=False):
         
         self.path_plot = path_plot
         self.name_cube = name_cube
@@ -49,13 +49,26 @@ class Plotter:
             self.thin   = int(0.5 * np.nanmin(tau))
             
         self.names_param = np.array(gmodel.names_param)
+        self.unconstrained = unconstrained
         
         return
 
     def makeplot_corner_emcee(self, savefig:bool=True) -> plt.Figure:
         
-        chain = Chain.from_emcee(self.sampler, self.names_param, self.name_cube, discard=self.burnin, thin=self.thin)
-        consumer = ChainConsumer().add_chain(chain)
+        flat_samples = self.sampler.get_chain(discard=self.burnin, flat=True, thin=self.thin)
+        if self.unconstrained:
+            iA21,iA22 = _idx(self.names_param,'A21'),_idx(self.names_param,'A22')
+            iS21,iS22 = _idx(self.names_param,'S21'),_idx(self.names_param,'S22')
+            flat_samples[:,iA21] = _softplus(flat_samples[:,iA21])
+            flat_samples[:,iA22] = _softplus(flat_samples[:,iA22])
+            flat_samples[:,iS21] = _softplus(flat_samples[:,iS21])
+            flat_samples[:,iS22] = _softplus(flat_samples[:,iS22]) + flat_samples[:,iS21]
+            
+        df = pd.DataFrame()
+        for i, label in enumerate(self.names_param):
+            df[label] = flat_samples[:,i]
+        chain = Chain(samples=df, name='emcee')
+        consumer = ChainConsumer().add_chain(chain)        
         
         try:
             fig = consumer.plotter.plot()
@@ -65,16 +78,10 @@ class Plotter:
         
         if 'Skew_A21' in self.df:
             N = len(self.names_param)
-            
-            argwhere_A21 = np.argwhere(self.names_param=='A21').item()
-            argwhere_A22 = np.argwhere(self.names_param=='A22').item()
-            argwhere_S21 = np.argwhere(self.names_param=='S21').item()
-            argwhere_S22 = np.argwhere(self.names_param=='S22').item()
-
-            ax = fig.axes[argwhere_A21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A21'].item(),self.df['Kurt_A21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
-            ax = fig.axes[argwhere_A22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A22'].item(),self.df['Kurt_A22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
-            ax = fig.axes[argwhere_S21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S21'].item(),self.df['Kurt_S21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
-            ax = fig.axes[argwhere_S22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S22'].item(),self.df['Kurt_S22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+            ax = fig.axes[iA21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A21'].item(),self.df['Kurt_A21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+            ax = fig.axes[iA22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A22'].item(),self.df['Kurt_A22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+            ax = fig.axes[iS21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S21'].item(),self.df['Kurt_S21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+            ax = fig.axes[iS22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S22'].item(),self.df['Kurt_S22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
         
         if savefig:
             fig.savefig(self.savename_corner_emcee, transparent=True)

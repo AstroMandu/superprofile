@@ -45,6 +45,7 @@ from .subroutines_Plotfitter import (
     get_asymmetry_residuals,
     get_mode,
     sort_outliers,
+    _softplus, _inv_softplus, _idx
 )
 
 
@@ -154,6 +155,8 @@ class Plotfit:
         self.bandwidth = np.nan
         # Backward-compat alias (if any external code inspects it)
         self.bandwidh = None  # set after check_stacked
+        
+        self.unconstrained = True
 
         # Autocorr tracking arrays
         self._reset_autocorr_buffers(maxiter=self.maxiter_2G)
@@ -429,17 +432,30 @@ class Plotfit:
             "S1": np.array([self.dispmin, self.dispmax]),
             "B1": np.array([-3.0, 3.0]) * float(np.nanmax(yy)),
         }
-
-        gmodel = Gmodel(xx, yy, e_y, names_param, dict_bound)
-        gmodel.log_prob = gmodel.log_prob_1G
-
+        
         if guess is None:
             guess = np.array([np.nanmax(yy), 0.0, 10.0, 0.0])[: len(names_param)]
 
+        gmodel = Gmodel(xx, yy, e_y, names_param, dict_bound)
+        if self.unconstrained:
+            gmodel.log_prob = gmodel.log_prob_1G_unconstrained
+            for i,name in enumerate(gmodel.names_param):
+                if name[0]=='A': guess[i] = _inv_softplus(guess[i])
+                if name[0]=='S': guess[i] = _inv_softplus(guess[i])
+        else:
+            gmodel.log_prob = gmodel.log_prob_1G
+
         res = minimize(gmodel.log_prob_guess, guess, method="Nelder-Mead")
+        
+        resx = res.x
+        if self.unconstrained:
+            for i,name in enumerate(gmodel.names_param):
+                if name[0]=='A': resx[i] = _softplus(resx[i])
+                if name[0]=='S': resx[i] = _softplus(resx[i])
+                
         if return_gmodel:
-            return gmodel.array_to_dict_guess(res.x), gmodel
-        return gmodel.array_to_dict_guess(res.x)
+            return gmodel.array_to_dict_guess(resx), gmodel
+        return gmodel.array_to_dict_guess(resx)
 
     def limit_range(self, multiplier_disp: float = 10) -> None:
         """Trim x-range to ~±multiplier_disp × S1 around V1 from a quick 1G fit."""
@@ -450,8 +466,8 @@ class Plotfit:
         xf = min(V1 + S1 * multiplier_disp, float(self.xmax))
 
         df_limited = self.df_stacked.loc[self.df_stacked["x"].between(xi, xf)]
-        self.x = np.asarray(df_limited["x"], dtype=float)
-        self.y = np.asarray(df_limited["y"], dtype=float)
+        self.x   = np.asarray(df_limited["x"], dtype=float)
+        self.y   = np.asarray(df_limited["y"], dtype=float)
         self.e_y = np.asarray(df_limited["e_y"], dtype=float)
 
         self.xmin, self.xmax = map(float, np.nanpercentile(self.x, [0, 100]))
@@ -466,7 +482,20 @@ class Plotfit:
         flat_samples = sampler.get_chain(discard=burnin, flat=True, thin=thin)
         log_probs = sampler.get_log_prob(discard=burnin, flat=True, thin=thin)
         max_prob_index = int(np.nanargmax(log_probs))
-
+        
+        if self.unconstrained:
+            if 'A1' in names:
+                iA1,iS1 = _idx(names,'A1'),_idx(names,'S1')
+                flat_samples[:,iA1] = _softplus(flat_samples[:,iA1])
+                flat_samples[:,iS1] = _softplus(flat_samples[:,iS1])
+            if 'A21' in names:
+                iA21,iA22 = _idx(names,'A21'),_idx(names,'A22')
+                iS21,iS22 = _idx(names,'S21'),_idx(names,'S22')
+                flat_samples[:,iA21] = _softplus(flat_samples[:,iA21])
+                flat_samples[:,iA22] = _softplus(flat_samples[:,iA22])
+                flat_samples[:,iS21] = _softplus(flat_samples[:,iS21])
+                flat_samples[:,iS22] = _softplus(flat_samples[:,iS22]) + flat_samples[:,iS21]
+                
         if self.statistics == "median":
             for i, label in enumerate(names):
                 p16, p50, p84 = np.percentile(flat_samples[:, i], [16, 50, 84])
@@ -515,21 +544,29 @@ class Plotfit:
 
         res_1G, gmodel = self.makefit_1G_minimize(xx, yy, e_y, guess=guess, return_gmodel=True)
         guess_vec = [res_1G[param] for param in gmodel.names_param]
-        self.gmodel = gmodel
-
-        self.stat = "1GFIT"
         nwalkers = max(4, int(len(guess_vec) * 2))
         ndim = len(guess_vec)
-
-        # Clip initial walkers to bounds
-        lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
-        ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
-        pos = np.clip(np.array(guess_vec) + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
+        
+        if self.unconstrained:
+            for i,name in enumerate(gmodel.names_param):
+                if name[0]=='A': guess_vec[i] = _inv_softplus(guess_vec[i])
+                if name[0]=='S': guess_vec[i] = _inv_softplus(guess_vec[i])
+            pos = guess_vec + 0.1*np.random.randn(nwalkers,ndim)
+            log_prob_1G = gmodel.log_prob_1G_unconstrained
+        else:
+            # Clip initial walkers to bounds
+            lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
+            ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+            pos = np.clip(np.array(guess_vec) + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
+            log_prob_1G = gmodel.log_prob_1G
+        
+        self.gmodel = gmodel
+        self.stat = "1GFIT"
 
         sampler = emcee.EnsembleSampler(
             nwalkers,
             ndim,
-            gmodel.log_prob_1G,
+            log_prob_1G,
             moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
         )
 
@@ -572,8 +609,10 @@ class Plotfit:
             "S1": self.df["S1"][0],
         }
         guess_map = {
-            "A21": dict_1Gfit["A1"] * 0.45,
-            "A22": dict_1Gfit["A1"] * 0.45,
+            # "A21": dict_1Gfit["A1"] * 0.45,
+            # "A22": dict_1Gfit["A1"] * 0.45,
+            "A21": dict_1Gfit["A1"] * 0.8,
+            "A22": dict_1Gfit["A1"] * 0.1,
             "V21": dict_1Gfit["V1"],
             "V22": dict_1Gfit["V1"],
             "S21": dict_1Gfit["S1"],
@@ -591,18 +630,9 @@ class Plotfit:
         guess = np.array([guess_map[p] for p in names_param], dtype=float)
         return guess, names_param
         
-
-
-
     def makefit_2G(self, maxiter: int = 100_000) -> None:
-        
-        def _idx(names, key):
-            idx = np.where(names == key)[0]
-            return int(idx[0]) if idx.size > 0 else None
 
         def enforce_narrow_first(trial, gmodel, margin_frac=1e-9):
-
-            
             """
             Ensure S21 < S22 by swapping the *entire* (A,V,S) triplets if needed.
             Also enforce a tiny strict inequality margin.
@@ -665,7 +695,6 @@ class Plotfit:
             argwhere_S21 = np.argwhere(names=='S21').item()
             argwhere_S22 = np.argwhere(names=='S22').item()
             
-            
             for i, p in enumerate(names):
                 if p=='S22':
                     ub[i] = float(self.df["S1"][0])*3
@@ -707,9 +736,6 @@ class Plotfit:
 
             return pos
 
-
-
-        
         if not self.GFIT1_success:
             self.df_params["Reliable"] = "N"
             return
@@ -728,10 +754,11 @@ class Plotfit:
             "A22": np.array([-0.001 * self.ymax, self.ymax * 1.5], dtype=float),
             "V21": np.array([-5 * S1, 5 * S1], dtype=float),
             "V22": np.array([-5 * S1, 5 * S1], dtype=float),
-            # "S21": np.array([self.dispmin, self.dispmax], dtype=float),
-            # "S22": np.array([self.dispmin, self.dispmax], dtype=float),
-            "S21": np.array([self.dispmin, S1], dtype=float),
-            "S22": np.array([S1, self.dispmax], dtype=float),
+            "S21": np.array([self.dispmin, self.dispmax], dtype=float),
+            "S22": np.array([self.dispmin, self.dispmax], dtype=float),
+            # "S21": np.array([self.dispmin, S1], dtype=float),
+            # "S21": np.array([0, S1], dtype=float),
+            # "S22": np.array([S1, self.dispmax], dtype=float),
             "B2": np.array([B1 - N1, B1 + N1], dtype=float),
         }
 
@@ -772,21 +799,38 @@ class Plotfit:
 
         guess, names_param = self.make_guess()
         gmodel = Gmodel(self.x, self.y, self.e_y, names_param, dict_bound, self.df)
-        gmodel.log_prob = gmodel.log_prob_2G
+
         self.guess_2gfit = guess
         self.gmodel = gmodel
         self.params_2gfit = names_param
         self.dict_bound = dict_bound.copy()
-
-        # Check guess validity
-        if not np.all(np.isfinite(gmodel.log_prior_2G_diagnose(guess))):
-            raise ValueError("initial guess violates priors")
-
+        
         ndim = len(guess)
         nwalkers = 4 * ndim
-
-        # NEW: initialize from prior
-        pos = sample_initial_from_prior(gmodel, nwalkers, guess=guess)
+        
+        if self.unconstrained:
+            iA21,iA22 = _idx(gmodel.names_param,'A21'),_idx(gmodel.names_param,'A22')
+            iS21,iS22 = _idx(gmodel.names_param,'S21'),_idx(gmodel.names_param,'S22')
+            guess[iA21],guess[iA22] = _inv_softplus(guess[iA21]),_inv_softplus(guess[iA22])
+            guess[iS21] = _inv_softplus(guess[iS21])
+            guess[iS22] = _inv_softplus(guess[iS22]) - guess[iS21]
+            pos = guess + 0.1*np.random.randn(nwalkers,ndim)
+            log_prob_2G = gmodel.log_prob_2G_unconstrained
+        else:
+            # Clip initial walkers to bounds
+            lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
+            ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+            pos = np.clip(np.array(guess) + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
+            log_prob_2G = gmodel.log_prob_2G
+            
+            # Check guess validity
+            if not np.all(np.isfinite(gmodel.log_prior_2G_diagnose(guess))):
+                raise ValueError("initial guess violates priors")
+            
+            # NEW: initialize from prior
+            pos = sample_initial_from_prior(gmodel, nwalkers, guess=guess)
+        
+        gmodel.log_prob = log_prob_2G
 
         sampler = emcee.EnsembleSampler(
             nwalkers,
@@ -795,7 +839,6 @@ class Plotfit:
             moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
         )
         self.sampler = sampler        
-        
 
         self._reset_autocorr_buffers(self.maxiter)
         for _ in sampler.sample(pos, iterations=self.maxiter):
@@ -859,8 +902,15 @@ class Plotfit:
         S1s = np.full(self.nsample, np.nan, dtype=float)
 
         guess_1G = self.df.loc[0, ["A1", "V1", "S1", "B1"]].to_numpy(dtype=float)
-        N1 = float(self.df["N1"][0])
-
+        if self.unconstrained:
+            guess_1G[0] = _inv_softplus(guess_1G[0])
+            guess_1G[2] = _inv_softplus(guess_1G[2])
+            iA21,iA22 = _idx(names_param,'A21'),_idx(names_param,'A22')
+            iS21,iS22 = _idx(names_param,'S21'),_idx(names_param,'S22')
+            guess[iA21],guess[iA22] = _inv_softplus(guess[iA21]),_inv_softplus(guess[iA22])
+            guess[iS21] = _inv_softplus(guess[iS21])
+            guess[iS22] = _inv_softplus(guess[iS22]) - guess[iS21]
+        
         pbar = tqdm(total=nsample) if pbar_resample else None
         timei = time.time()
 
@@ -875,6 +925,10 @@ class Plotfit:
 
                 res_1G = self.makefit_1G_minimize(self.x, y_w_noise, self.e_y, guess=guess_1G)
                 A1, V1, S1, B1 = (res_1G[k] for k in ["A1", "V1", "S1", "B1"])
+                
+                if self.unconstrained:
+                    A1 = _softplus(A1)
+                    S1 = _softplus(S1)
 
                 # Update bounds that depend on data scale
                 gmodel.update_bound("A21", np.array([-0.001, 1.5], dtype=np.float64) * ymax)
@@ -900,6 +954,12 @@ class Plotfit:
 
         if pbar is not None:
             pbar.close()
+            
+        if self.unconstrained:
+            resampled[:,iA21] = _softplus(resampled[:,iA21])
+            resampled[:,iA22] = _softplus(resampled[:,iA22])
+            resampled[:,iS21] = _softplus(resampled[:,iS21])
+            resampled[:,iS22] = _softplus(resampled[:,iS22]) + resampled[:,iS21]
 
         self.resampled = resampled
 
@@ -1075,6 +1135,7 @@ class Plotfit:
             self.gmodel,
             self.sampler,
             self.resampled,
+            self.unconstrained
         )
         plotter.makeplot_atlas()
 

@@ -135,3 +135,15 @@ def log_L_1G_jit(x, y, inv_e_y, A1, V1, S1, B1):
 def log_L_2G_jit(x, y, inv_e_y, A21, A22, V21, V22, S21, S22, B2):
     model = gauss(x, A21, V21, S21) + gauss(x, A22, V22, S22) + B2
     return chisq_gauss2(y, model, inv_e_y)
+
+@njit
+def _softplus(x):
+    return np.log(1+np.exp(x))
+
+@njit
+def _inv_softplus(y):
+    return np.log(np.exp(y)-1)
+
+def _idx(names, key):
+    idx = np.where(names == key)[0]
+    return int(idx[0]) if idx.size > 0 else None

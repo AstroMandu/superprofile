@@ -383,9 +383,10 @@ homedirs = [
     # path_data/'test_chanres/5.16kms',
     # path_data/'test_chanres/10.3kms',
     # path_data+'/Rory/RPfiles',
-    '/home/mskim/workspace/research/data/AVID'
+    # '/home/mskim/workspace/research/data/AVID'
+    # '/home/mskim/workspace/research/data/AVID_halfbeam'
     
-    # '/home/mskim/workspace/research/data/test'
+    '/home/mskim/workspace/research/data/test'
     # '/home/mskim/workspace/research/data/test_LBFGSB'
     # '/home/mskim/workspace/research/data/test_neldermead'
     # '/home/mskim/workspace/research/data/test_SNR3_snch_sbbw'
@@ -402,7 +403,7 @@ nametype_galaxy = '*'
 multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.1)]
 
 # multipliers = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
-# multipliers = [1.4]
+# multipliers = [0.4]
 
 # multipliers = [0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
 
@@ -410,7 +411,7 @@ multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.1)]
 # multipliers = [2.9,3.0]
 
 # multipliers = multipliers[::2]
-multipliers = np.flip(multipliers[1::2])
+# multipliers = np.flip(multipliers[1::2])
 # multipliers = np.flip(multipliers)
 
 # col_radius = 'r25';      radtag='r25'
@@ -429,10 +430,10 @@ truth_from_resampling = True
 
 num_cores = 33
 
-bool_overwrite     = 0
-remove_temp        = 0
+bool_overwrite     = 1
+remove_temp        = 1
 
-overwrite_classify = 0
+overwrite_classify = 1
 bool_do_clfy       = 1
 
 bool_do_whole  = 0
@@ -468,8 +469,8 @@ statV22 = 'r' if dict_glob['dict_params']['V22']=='free' else 'x'
 statB2  = 'r' if dict_glob['dict_params']['B2' ]=='free' else 'x'
 dict_glob['pbar_resample'] = False
 dict_glob['nsample_resample'] = nsample_resample
-# dict_glob['mode'] = 'baygaud'
-dict_glob['mode'] = 'hermite'
+dict_glob['mode'] = 'baygaud'
+# dict_glob['mode'] = 'hermite'
 # dict_glob['vdisp_low_intrinsic'] = 1.5
 dict_glob['vdisp_low_intrinsic'] = 0
 dict_glob['radtag'] = radtag
@@ -482,7 +483,7 @@ for homedir in homedirs:
     path_output = None
     # path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
     
-    path_output = homedir.parent / f'{homedir.name}'
+    # path_output = homedir.parent / f'{homedir.name}_2beam'
     # path_output = homedir.parent / f'{homedir.name}_2VFonly'
     
     paths_cube = glob.glob(str(homedir / f'{nametype_galaxy}/{nametype_cube}'))
