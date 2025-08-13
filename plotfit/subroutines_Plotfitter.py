@@ -145,7 +145,7 @@ def _inv_softplus(y):
     return y + np.log(-np.expm1(-y))
 
 @njit(fastmath=True, cache=True)
-def _sigmoid_mapped(raw, lo, hi):
+def _sigmoid_mapped(raw, bound):
     """
     Map raw real values -> scaled in (lo, hi) using a logistic function.
     
@@ -156,11 +156,10 @@ def _sigmoid_mapped(raw, lo, hi):
     lo, hi : float
         Lower and upper bounds of the target range.
     """
-    lo = float(lo)
-    hi = float(hi)
+    lo,hi = bound
     return lo + (hi - lo) / (1.0 + np.exp(-raw))
 
-def _inv_sigmoid_mapped(scaled, lo, hi, eps=1e-12):
+def _inv_sigmoid_mapped(scaled, bound, eps=1e-12):
     """
     Inverse of scaled_sigmoid: map scaled in (lo, hi) -> raw real values.
     
@@ -173,8 +172,7 @@ def _inv_sigmoid_mapped(scaled, lo, hi, eps=1e-12):
     eps : float
         Small epsilon to keep away from exactly lo or hi to avoid infs.
     """
-    lo = float(lo)
-    hi = float(hi)
+    lo,hi=bound
     # Normalize to (0, 1)
     x = (scaled - lo) / (hi - lo)
     # Clip to avoid log(0) or log(∞)

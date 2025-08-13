@@ -242,8 +242,8 @@ class Plotfit:
                 params_mapped = params_dict.copy()
                 params_dict['A21'] = _softplus(params_dict['A21'])
                 params_dict['A22'] = _softplus(params_dict['A22'])
-                params_dict['S21'] = _sigmoid_mapped(params_dict['S21'], gmodel.dict_bound['S21'][0], gmodel.dict_bound['S21'][1])
-                params_dict['S21'] = _softplus(params_dict['S22']) + params_dict['S21']
+                params_dict['S21'] = _sigmoid_mapped(params_dict['S21'], gmodel.dict_bound['S21'])
+                params_dict['S22'] = params_dict['S21'] + _sigmoid_mapped(params_dict['S22'], gmodel.dict_bound['S22'])
             else:
                 params_mapped = gmodel.array_to_dict_guess(gmodel.map_params(params).flatten())
 
@@ -481,8 +481,8 @@ class Plotfit:
                 iS21,iS22 = _idx(names,'S21'),_idx(names,'S22')
                 flat_samples[:,iA21] = _softplus(flat_samples[:,iA21])
                 flat_samples[:,iA22] = _softplus(flat_samples[:,iA22])
-                flat_samples[:,iS21] = _sigmoid_mapped(flat_samples[:,iS21],self.dispmin,self.df.loc[0,'S1'])
-                flat_samples[:,iS22] = _softplus(flat_samples[:,iS22]) + flat_samples[:,iS21]
+                flat_samples[:,iS21] = _sigmoid_mapped(flat_samples[:,iS21],self.dict_bound['S21'])
+                flat_samples[:,iS22] = _sigmoid_mapped(flat_samples[:,iS22],self.dict_bound['S22']) + flat_samples[:,iS21]
                 
         if self.statistics == "median":
             for i, label in enumerate(names):
@@ -755,7 +755,7 @@ class Plotfit:
             "V21": np.array([-5 * S1, 5 * S1], dtype=float),
             "V22": np.array([-5 * S1, 5 * S1], dtype=float),
             "S21": np.array([self.dispmin, S1], dtype=float),
-            "S22": np.array([self.dispmin, self.dispmax], dtype=float),
+            "S22": np.array([0, self.dispmax], dtype=float),
             # "S21": np.array([self.dispmin, S1], dtype=float),
             # "S21": np.array([0, S1], dtype=float),
             # "S22": np.array([S1, self.dispmax], dtype=float),
@@ -812,8 +812,8 @@ class Plotfit:
             iA21,iA22 = _idx(gmodel.names_param,'A21'),_idx(gmodel.names_param,'A22')
             iS21,iS22 = _idx(gmodel.names_param,'S21'),_idx(gmodel.names_param,'S22')
             guess[iA21],guess[iA22] = _inv_softplus(guess[iA21]),_inv_softplus(guess[iA22])
-            guess[iS21] = _inv_sigmoid_mapped(guess[iS21],self.dispmin,S1)
-            guess[iS22] = _inv_softplus(guess[iS22]) - guess[iS21]
+            guess[iS21] = _inv_sigmoid_mapped(guess[iS21],gmodel.dict_bound['S21'])
+            guess[iS22] = _inv_sigmoid_mapped(guess[iS22],gmodel.dict_bound['S22']) - guess[iS21]
             pos = guess + 0.1*np.random.randn(nwalkers,ndim)
             log_prob_2G = gmodel.log_prob_2G_unconstrained
         else:
@@ -930,8 +930,8 @@ class Plotfit:
             iA21,iA22 = _idx(names_param,'A21'),_idx(names_param,'A22')
             iS21,iS22 = _idx(names_param,'S21'),_idx(names_param,'S22')
             guess[iA21],guess[iA22] = _inv_softplus(guess[iA21]),_inv_softplus(guess[iA22])
-            guess[iS21] = _inv_sigmoid_mapped(guess[iS21],self.dispmin,self.df.loc[0,'S1'])
-            guess[iS22] = _inv_softplus(guess[iS22]) - guess[iS21]
+            guess[iS21] = _inv_sigmoid_mapped(guess[iS21],self.dict_bound['S21'])
+            guess[iS22] = _inv_sigmoid_mapped(guess[iS22],self.dict_bound['S22']) - guess[iS21]
         
         pbar = tqdm(total=nsample) if pbar_resample else None
         timei = time.time()
@@ -981,8 +981,8 @@ class Plotfit:
         if self.unconstrained:
             resampled[:,iA21] = _softplus(resampled[:,iA21])
             resampled[:,iA22] = _softplus(resampled[:,iA22])
-            resampled[:,iS21] = _sigmoid_mapped(resampled[:,iS21],self.dispmin,S1s)
-            resampled[:,iS22] = _softplus(resampled[:,iS22]) + resampled[:,iS21]
+            resampled[:,iS21] = _sigmoid_mapped(resampled[:,iS21],np.column_stack((np.full_like(S1s, self.dispmin), S1s)))
+            resampled[:,iS22] = _sigmoid_mapped(resampled[:,iS22],self.dict_bound['S22']) + resampled[:,iS21]
 
         self.resampled = resampled
 
