@@ -107,7 +107,10 @@ class Gmodel:
         else: V1=self.V1
         uA1 = _softplus(A1)
         uS1 = _softplus(S1)
-        return self.log_L_1G(uA1,V1,uS1,B1)
+        logl = self.log_L_1G(uA1,V1,uS1,B1)
+        if not np.isfinite(logl):
+            return -np.inf
+        return logl
     
     def log_prob_2G(self, params):
         A21,A22,S21,S22 = params[self.argwhere_A21],params[self.argwhere_A22],params[self.argwhere_S21],params[self.argwhere_S22]
@@ -134,7 +137,10 @@ class Gmodel:
         uA21,uA22 = _softplus(A21), _softplus(A22)
         uS21,uS22 = _softplus(S21), _softplus(S22)
         uS22 += uS21
-        return self.log_L_2G(uA21,uA22,V21,V22,uS21,uS22,B2)
+        logl = self.log_L_2G(uA21,uA22,V21,V22,uS21,uS22,B2)
+        if not np.isfinite(logl):
+            return -np.inf
+        return logl
 
     def array_to_dict_guess(self, params):
         return dict(zip(self.names_param, params))

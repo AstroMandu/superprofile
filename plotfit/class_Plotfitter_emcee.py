@@ -257,7 +257,14 @@ class Plotfit:
             df_diag["Index"] = ["orig", "mapd", "fini"]
 
             params_dict = gmodel.array_to_dict_guess(params)
-            params_mapped = gmodel.array_to_dict_guess(gmodel.map_params(params).flatten())
+            if self.unconstrained:
+                params_mapped = params_dict.copy()
+                params_dict['A21'] = _softplus(params_dict['A21'])
+                params_dict['A22'] = _softplus(params_dict['A22'])
+                params_dict['S21'] = _softplus(params_dict['S21'])
+                params_dict['S21'] = _softplus(params_dict['S22']) + params_dict['S21']
+            else:
+                params_mapped = gmodel.array_to_dict_guess(gmodel.map_params(params).flatten())
 
             df_diag["S1"] = [gmodel.S1, None, None]
             for label in gmodel.names_param:
@@ -548,9 +555,9 @@ class Plotfit:
         ndim = len(guess_vec)
         
         if self.unconstrained:
-            for i,name in enumerate(gmodel.names_param):
-                if name[0]=='A': guess_vec[i] = _inv_softplus(guess_vec[i])
-                if name[0]=='S': guess_vec[i] = _inv_softplus(guess_vec[i])
+            iA1,iS1 = _idx(gmodel.names_param,'A1'),_idx(gmodel.names_param,'S1')
+            guess_vec[iA1] = _inv_softplus(guess_vec[iA1])
+            guess_vec[iS1] = _inv_softplus(guess_vec[iS1])
             pos = guess_vec + 0.1*np.random.randn(nwalkers,ndim)
             log_prob_1G = gmodel.log_prob_1G_unconstrained
         else:
@@ -567,13 +574,25 @@ class Plotfit:
             nwalkers,
             ndim,
             log_prob_1G,
-            moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
+            # moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
         )
 
         # Reset autocorr tracking for this run length
         self._reset_autocorr_buffers(self.maxiter)
 
-        for _ in sampler.sample(pos, iterations=self.maxiter):
+        for state in sampler.sample(pos, iterations=self.maxiter):
+            bad = ~np.isfinite(state.log_prob)
+            if np.any(bad):
+                bad_coords = state.coords[bad]
+                # Map & print the bad walkers
+                pos_mapped = bad_coords.copy()
+                if self.unconstrained:
+                    pos_mapped[:, iA1] = _softplus(pos_mapped[:, iA1])
+                    pos_mapped[:, iS1] = _softplus(pos_mapped[:, iS1])
+                for p_map, p_raw in zip(pos_mapped, bad_coords):
+                    print(gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
+                break  # stop immediately so you can debug
+            
             if sampler.iteration % self.testlength:
                 continue
             if self.check_converged(sampler, gmodel, generate_plot=False):
@@ -836,16 +855,38 @@ class Plotfit:
             nwalkers,
             ndim,
             gmodel.log_prob,
-            moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
+            # moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
         )
         self.sampler = sampler        
 
         self._reset_autocorr_buffers(self.maxiter)
-        for _ in sampler.sample(pos, iterations=self.maxiter):
+        
+        for state in sampler.sample(pos, iterations=self.maxiter):
+            bad = ~np.isfinite(state.log_prob)
+            if np.any(bad):
+                bad_coords = state.coords[bad]
+                # Map & print the bad walkers
+                pos_mapped = bad_coords.copy()
+                if self.unconstrained:
+                    pos_mapped[:, iA21] = _softplus(pos_mapped[:, iA21])
+                    pos_mapped[:, iA22] = _softplus(pos_mapped[:, iA22])
+                    pos_mapped[:, iS21] = _softplus(pos_mapped[:, iS21])
+                    pos_mapped[:, iS22] = _softplus(pos_mapped[:, iS22]) + pos_mapped[:, iS21]
+                for p_map, p_raw in zip(pos_mapped, bad_coords):
+                    print(gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
+                break  # stop immediately so you can debug
+            
             if sampler.iteration % self.testlength:
                 continue
-            if self.check_converged(sampler, gmodel, generate_plot=self.plot_autocorr):
+            if self.check_converged(sampler, gmodel, generate_plot=True):#self.plot_autocorr):
                 break
+
+        
+        # for _ in sampler.sample(pos, iterations=self.maxiter):
+        #     if sampler.iteration % self.testlength:
+        #         continue
+        #     if self.check_converged(sampler, gmodel, generate_plot=self.plot_autocorr):
+        #         break
 
         if self.plot_autocorr and self.savename_autocorr is not None and self.savename_autocorr.exists():
             try:

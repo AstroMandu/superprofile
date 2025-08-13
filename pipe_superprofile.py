@@ -458,8 +458,8 @@ dict_glob = {}
 dict_glob['dict_params']={
     'A21':'free', # free only
     'A22':'free', # free only
-    'V21':'fix',    # fix will make V21=V1; 0 will fix velocity to zero
-    'V22':'fix',  # fix will make V22=V21, has to be 'fix' if V21=fix or V21=0
+    'V21':'free',    # fix will make V21=V1; 0 will fix velocity to zero
+    'V22':'free',  # fix will make V22=V21, has to be 'fix' if V21=fix or V21=0
     'S21':'free', # free only
     'S22':'free', # free only
     'B2' :'fix'   # fix will make B1=B2s
@@ -481,7 +481,7 @@ for homedir in homedirs:
     
     homedir = Path(homedir)
     path_output = None
-    # path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
+    path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
     
     # path_output = homedir.parent / f'{homedir.name}_2beam'
     # path_output = homedir.parent / f'{homedir.name}_2VFonly'

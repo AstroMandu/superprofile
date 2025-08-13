@@ -136,13 +136,12 @@ def log_L_2G_jit(x, y, inv_e_y, A21, A22, V21, V22, S21, S22, B2):
     model = gauss(x, A21, V21, S21) + gauss(x, A22, V22, S22) + B2
     return chisq_gauss2(y, model, inv_e_y)
 
-@njit
-def _softplus(x):
-    return np.log(1+np.exp(x))
+def _softplus(z):
+    return np.log1p(np.exp(-np.abs(z))) + np.maximum(z, 0.0)
 
 @njit
 def _inv_softplus(y):
-    return np.log(np.exp(y)-1)
+    return y + np.log(-np.expm1(-y))
 
 def _idx(names, key):
     idx = np.where(names == key)[0]
