@@ -226,58 +226,101 @@ def _idx(names, key):
     idx = np.where(names == key)[0]
     return int(idx[0]) if idx.size > 0 else None
 
+def relabel_by_width(samples, names):
+    """
+    Relabel so S21 <= S22, swapping (A,V,S) consistently per draw.
+    Accepts:
+      - samples: (n_samples, ndim) or (ndim,)
+      - names:   array-like with 'A21','A22','V21','V22','S21','S22'
+    Returns same shape as input.
+    """
+    arr = np.asarray(samples)
+    one_d = (arr.ndim == 1)
+    work = arr[None, :].copy() if one_d else arr.copy()
+
+    names = np.asarray(names)
+
+    # required indices
+    def idx(name):
+        w = np.where(names == name)[0]
+        if w.size == 0:
+            raise KeyError(f"Parameter '{name}' not found in names.")
+        return int(w[0])
+
+    iS21, iS22 = idx('S21'), idx('S22')
+    # optional pairs (in case someone runs without V’s, etc.)
+    pairs = []
+    for a,b in [('A21','A22'), ('V21','V22')]:
+        try:
+            pairs.append((idx(a), idx(b)))
+        except KeyError:
+            pass  # skip if missing
+
+    # rows needing swap
+    swap = work[:, iS21] > work[:, iS22]
+
+    # vectorized column swap on masked rows
+    def swap_cols(a, i, j, m):
+        tmp = a[:, i].copy()
+        a[m, i] = a[m, j]
+        a[m, j] = tmp[m]
+
+    # widths first (defines the ordering), then the paired params
+    swap_cols(work, iS21, iS22, swap)
+    for i, j in pairs:
+        swap_cols(work, i, j, swap)
+
+    return work[0] if one_d else work
+
 def demap_params_unconstrained(params, gmodel):
+    # def demap_A21(A21): return _softplus(A21)
+    # def demap_A22(A22): return _softplus(A22)
     
-    def demap_A21(A21): return _softplus(A21)
-    def demap_A22(A22): return _softplus(A22)
+    def demap_A21(A21): return _sigmoid_mapped(A21,gmodel.dict_bound['A21'])
+    def demap_A22(A22): return _sigmoid_mapped(A22,gmodel.dict_bound['A21'])
+    
     def demap_S21_S22(S21,S22):
-        S21,S22 = _clip_raw(S21), _clip_raw(S22)
-        uS21 = _softplus(S21) + S_EPS
-        uS22 = _softabs(S22) + uS21 + S_EPS
-        uS21 = np.clip(uS21, S_EPS, S_MAX)
-        uS22 = np.clip(uS22, uS21 + S_EPS, S_MAX)
+        # S21,S22 = _clip_raw(S21), _clip_raw(S22)
+        # uS21 = _softplus(S21) + S_EPS
+        # uS22 = _softabs(S22) + uS21 + S_EPS
+        # uS21 = np.clip(uS21, S_EPS, S_MAX)
+        # uS22 = np.clip(uS22, uS21 + S_EPS, S_MAX)
+        uS21 = gmodel.dict_bound['S21'][0] + _softplus(S21)
+        uS22 = gmodel.dict_bound['S21'][0] + _softplus(S22)
         return uS21, uS22
-    names = gmodel.names_param
-    iA21,iA22 = _idx(names,'A21'),_idx(names,'A22')
-    iS21,iS22 = _idx(names,'S21'),_idx(names,'S22')
     params_demapped = params.copy()
     if len(params.shape)>1:
-        params_demapped[:,iA21] = demap_A21(params[:,iA21])
-        params_demapped[:,iA22] = demap_A22(params[:,iA22])
-        params_demapped[:,iS21],params_demapped[:,iS22] = demap_S21_S22(params[:,iS21],params[:,iS22])
+        params_demapped[:,gmodel.iA21] = demap_A21(params[:,gmodel.iA21])
+        params_demapped[:,gmodel.iA22] = demap_A22(params[:,gmodel.iA22])
+        params_demapped[:,gmodel.iS21],   params_demapped[:,gmodel.iS22] = demap_S21_S22(params[:,gmodel.iS21],params[:,gmodel.iS22])
     else:
-        params_demapped[iA21] = demap_A21(params[iA21])
-        params_demapped[iA22] = demap_A21(params[iA22])
-        params_demapped[iS21],params_demapped[iS22] = demap_S21_S22(params[iS21],params[iS22])
-    
+        params_demapped[gmodel.iA21] = demap_A21(params[gmodel.iA21])
+        params_demapped[gmodel.iA22] = demap_A22(params[gmodel.iA22])
+        params_demapped[gmodel.iS21],params_demapped[gmodel.iS22] = demap_S21_S22(params[gmodel.iS21],params[gmodel.iS22])
     return params_demapped
 
 def map_params_unconstrained(params, gmodel):
-    
-    def map_A21(uA21): return _inv_softplus(uA21)
-    def map_A22(uA22): return _inv_softplus(uA22)
+    # def map_A21(uA21): return _inv_softplus(uA21)
+    # def map_A22(uA22): return _inv_softplus(uA22)
+    def map_A21(uA21): return _inv_sigmoid_mapped(uA21,gmodel.dict_bound['A21'])
+    def map_A22(uA22): return _inv_sigmoid_mapped(uA22,gmodel.dict_bound['A21'])
     def map_S21_S22(uS21, uS22):
-        uS21_eff = np.maximum(uS21 - S_EPS, S_EPS)
-        d_eff    = np.maximum(uS22 - uS21 - S_EPS, 0.0)
-        S21 = _inv_softplus(uS21_eff)
-        S22 = _inv_softabs(d_eff)
+        # uS21_eff = np.maximum(uS21 - S_EPS, S_EPS)
+        # d_eff    = np.maximum(uS22 - uS21 - S_EPS, 0.0)
+        # S21 = _inv_softplus(uS21_eff)
+        # S22 = _inv_softabs(d_eff)
+        S21 = _inv_softplus(uS21 - gmodel.dict_bound['S21'][0])
+        S22 = _inv_softplus(uS22 - gmodel.dict_bound['S21'][0])
         return S21, S22
-    
-    names = gmodel.names_param
-    iA21,iA22 = _idx(names,'A21'),_idx(names,'A22')
-    iS21,iS22 = _idx(names,'S21'),_idx(names,'S22')
-    
     params_mapped = params.copy()
-    
     if len(params.shape)>1:
-        params_mapped[:,iA21] = map_A21(params[:,iA21])
-        params_mapped[:,iA22] = map_A22(params[:,iA22])
-        params_mapped[:,iS21],params_mapped[:,iS22] = map_S21_S22(params[:,iS21],params[:,iS22])
+        params_mapped[:,gmodel.iA21] = map_A21(params[:,gmodel.iA21])
+        params_mapped[:,gmodel.iA22] = map_A22(params[:,gmodel.iA22])
+        params_mapped[:,gmodel.iS21],params_mapped[:,gmodel.iS22] = map_S21_S22(params[:,gmodel.iS21],params[:,gmodel.iS22])
     else:
-        params_mapped[iA21] = map_A21(params[iA21])
-        params_mapped[iA22] = map_A21(params[iA22])
-        params_mapped[iS21],params_mapped[iS22] = map_S21_S22(params[iS21],params[iS22])
-    
+        params_mapped[gmodel.iA21] = map_A21(params[gmodel.iA21])
+        params_mapped[gmodel.iA22] = map_A22(params[gmodel.iA22])
+        params_mapped[gmodel.iS21],params_mapped[gmodel.iS22] = map_S21_S22(params[gmodel.iS21],params[gmodel.iS22])
     return params_mapped
 
 @njit(fastmath=True, cache=True)
@@ -285,3 +328,5 @@ def _clip_raw(u, L=RAW_LIM):
     if u > L:   return L
     if u < -L:  return -L
     return u
+
+

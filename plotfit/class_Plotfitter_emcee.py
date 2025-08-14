@@ -46,7 +46,8 @@ from .subroutines_Plotfitter import (
     get_mode,
     sort_outliers,
     _softplus, _inv_softplus, _idx,
-    map_params_unconstrained, demap_params_unconstrained
+    map_params_unconstrained, demap_params_unconstrained,
+    relabel_by_width
 )
 
 
@@ -243,7 +244,8 @@ class Plotfit:
             params_dict = gmodel.array_to_dict_guess(params)
             if self.unconstrained:
                 params_mapped = params_dict.copy()
-                params_demapped = demap_params_unconstrained(params,gmodel)
+                params_demapped = relabel_by_width(demap_params_unconstrained(params,gmodel),gmodel.names_param)
+                
                 params_dict     = gmodel.array_to_dict_guess(params_demapped)
             else:
                 params_mapped = gmodel.array_to_dict_guess(gmodel.map_params(params).flatten())
@@ -379,8 +381,11 @@ class Plotfit:
             converged = True
         else:
             if np.all(np.isfinite(tau)):
-                converged = np.all(tau * self.slope_tau < iteration)
-                converged &= np.all(np.abs(self.old_tau - tau) / tau < 0.01)
+                # converged = np.all(tau * self.slope_tau < iteration)
+                # converged &= np.all(np.abs(self.old_tau - tau) / tau < 0.01)
+                
+                converged  = np.any(tau * self.slope_tau < iteration)
+                converged &= np.any(np.abs(self.old_tau - tau) / tau < 0.01)
 
         self.old_tau = tau
         index = int(iteration / self.testlength)
@@ -478,7 +483,8 @@ class Plotfit:
                 flat_samples[:,iA1] = _softplus(flat_samples[:,iA1])
                 flat_samples[:,iS1] = _softplus(flat_samples[:,iS1])
             if 'A21' in names:
-                flat_samples = demap_params_unconstrained(flat_samples, self.gmodel)
+                flat_samples = relabel_by_width(demap_params_unconstrained(flat_samples, self.gmodel),self.gmodel.names_param)
+                
         if self.statistics == "median":
             for i, label in enumerate(names):
                 p16, p50, p84 = np.percentile(flat_samples[:, i], [16, 50, 84])
@@ -745,12 +751,12 @@ class Plotfit:
 
         dict_bound = {
             # allow small negatives initially; later priors enforce physicality
-            "A21": np.array([-0.001 * self.ymax, self.ymax * 1.5], dtype=float),
-            "A22": np.array([-0.001 * self.ymax, self.ymax * 1.5], dtype=float),
+            "A21": np.array([0 * self.ymax, self.ymax * 1.5], dtype=float),
+            "A22": np.array([0 * self.ymax, self.ymax * 1.5], dtype=float),
             "V21": np.array([-5 * S1, 5 * S1], dtype=float),
             "V22": np.array([-5 * S1, 5 * S1], dtype=float),
-            "S21": np.array([self.dispmin, S1], dtype=float),
-            "S22": np.array([S1, self.dispmax], dtype=float),
+            "S21": np.array([self.dispmin, self.dispmax], dtype=float),
+            "S22": np.array([self.dispmin, self.dispmax], dtype=float),
             # "S21": np.array([self.dispmin, S1], dtype=float),
             # "S21": np.array([0, S1], dtype=float),
             # "S22": np.array([S1, self.dispmax], dtype=float),
@@ -804,7 +810,7 @@ class Plotfit:
         nwalkers = 4 * ndim
         
         if self.unconstrained:
-            guess = map_params_unconstrained(guess, gmodel)
+            guess = relabel_by_width(map_params_unconstrained(guess, gmodel),gmodel.names_param)
             
             pos = guess + 0.1*np.random.randn(nwalkers,ndim)
             log_prob_2G = gmodel.log_prob_2G_unconstrained
@@ -919,7 +925,7 @@ class Plotfit:
         if self.unconstrained:
             guess_1G[0] = _inv_softplus(guess_1G[0])
             guess_1G[2] = _inv_softplus(guess_1G[2])
-            guess = map_params_unconstrained(guess,self.gmodel)
+            guess = relabel_by_width(map_params_unconstrained(guess,self.gmodel),self.gmodel.names_param)
         pbar = tqdm(total=nsample) if pbar_resample else None
         timei = time.time()
 
@@ -940,9 +946,7 @@ class Plotfit:
                     S1 = _softplus(S1)
 
                 # Update bounds that depend on data scale
-                gmodel.update_bound("A21", np.array([-0.001, 1.5], dtype=np.float64) * ymax)
-                gmodel.update_bound("A22", np.array([-0.001, 1.5], dtype=np.float64) * ymax)
-                gmodel.update_bound("S21", np.array([self.dispmin,S1], dtype=np.float64))
+                # gmodel.update_bound("S21", np.array([self.dispmin,S1], dtype=np.float64))
                 # If B2 were free, could also update bounds using N1
                 # gmodel.update_bound("B2", np.array([B1 - N1, B1 + N1], dtype=np.float64))
 
@@ -966,7 +970,7 @@ class Plotfit:
             pbar.close()
             
         if self.unconstrained:
-            resampled = demap_params_unconstrained(resampled,self.gmodel)
+            resampled = relabel_by_width(demap_params_unconstrained(resampled,self.gmodel),self.gmodel.names_param)
         self.resampled = resampled
 
         # Fill resampled summary

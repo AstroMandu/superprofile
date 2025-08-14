@@ -1,5 +1,5 @@
 import numpy as np
-from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw
+from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw, _idx
 from pprint import pprint
 
 S_EPS  = np.float64(1e-12) 
@@ -30,29 +30,29 @@ class Gmodel:
             self.V1 = np.float64(df_plotfit.loc[0, 'V1'])
             
         if np.isin('A1',names_param):
-            self.argwhere_A1 = np.argwhere(names_param=='A1').item()
-            self.argwhere_S1 = np.argwhere(names_param=='S1').item()
-            self.argwhere_B1 = np.argwhere(names_param=='B1').item()
+            self.iA1 = _idx(names_param,'A1')
+            self.iS1 = _idx(names_param,'S1')
+            self.iB1 = _idx(names_param,'B1')
             self.has_V1 = False
             if np.isin('V1',names_param):
-                self.argwhere_V1 = np.argwhere(names_param=='V1').item()
+                self.iV1 = _idx(names_param,'V1')
                 self.has_V1 = True
         if np.isin('A21',names_param):
-            self.argwhere_A21 = np.argwhere(names_param=='A21').item()
-            self.argwhere_A22 = np.argwhere(names_param=='A22').item()
-            self.argwhere_S21 = np.argwhere(names_param=='S21').item()
-            self.argwhere_S22 = np.argwhere(names_param=='S22').item()
+            self.iA21 = _idx(names_param,'A21')
+            self.iA22 = _idx(names_param,'A22')
+            self.iS21 = _idx(names_param,'S21')
+            self.iS22 = _idx(names_param,'S22')
             self.has_V21 = False
             self.has_V22 = False
             self.has_B2  = False
             if np.isin('V21',names_param):
-                self.argwhere_V21 = np.argwhere(names_param=='V21').item()
+                self.iV21 = _idx(names_param,'V21')
                 self.has_V21 = True
             if np.isin('V22',names_param):
-                self.argwhere_V22 = np.argwhere(names_param=='V22').item()
+                self.iV22 = _idx(names_param,'V22')
                 self.has_V22 = True
             if np.isin('B2',names_param):
-                self.argwhere_B2 = np.argwhere(names_param=='B2').item()
+                self.iB2 = _idx(names_param,'B2')
                 self.has_B2 = True
 
         self.df = df_plotfit
@@ -98,16 +98,16 @@ class Gmodel:
         return log_L_2G_jit(self.x, self.y, self.inv_e_y, A21, A22, V21, V22, S21, S22, B2)
 
     def log_prob_1G(self, params):
-        A1,S1,B1 = params[self.argwhere_A1], params[self.argwhere_S1], params[self.argwhere_B1]
-        if self.has_V1: V1=params[self.argwhere_V1] 
+        A1,S1,B1 = params[self.iA1], params[self.iS1], params[self.iB1]
+        if self.has_V1: V1=params[self.iV1] 
         else: V1=self.V1
         mapped = self.map_params(params)
         if test_off_bounds(mapped): return -np.inf
         return self.log_L_1G(A1,V1,S1,B1)
     
     def log_prob_1G_unconstrained(self, params):
-        A1,S1,B1 = params[self.argwhere_A1], params[self.argwhere_S1], params[self.argwhere_B1]
-        if self.has_V1: V1=params[self.argwhere_V1] 
+        A1,S1,B1 = params[self.iA1], params[self.iS1], params[self.iB1]
+        if self.has_V1: V1=params[self.iV1] 
         else: V1=self.V1
         uA1 = _softplus(A1)
         uS1 = _softplus(S1)
@@ -117,12 +117,12 @@ class Gmodel:
         return logl
     
     def log_prob_2G(self, params):
-        A21,A22,S21,S22 = params[self.argwhere_A21],params[self.argwhere_A22],params[self.argwhere_S21],params[self.argwhere_S22]
-        if self.has_V21: V21=params[self.argwhere_V21] 
+        A21,A22,S21,S22 = params[self.iA21],params[self.iA22],params[self.iS21],params[self.iS22]
+        if self.has_V21: V21=params[self.iV21] 
         else: V21=self.V1
-        if self.has_V22: V22=params[self.argwhere_V22] 
+        if self.has_V22: V22=params[self.iV22] 
         else: V22=V21
-        if self.has_B2:  B2=params[self.argwhere_B2]   
+        if self.has_B2:  B2=params[self.iB2]   
         else: B2=self.B1
         mapped = self.map_params(params)
         if test_off_bounds(mapped): return -np.inf
@@ -131,23 +131,25 @@ class Gmodel:
         return self.log_L_2G(A21,A22,V21,V22,S21,S22,B2)
     
     def log_prob_2G_unconstrained(self, params):
-        A21,A22,S21,S22 = params[self.argwhere_A21],params[self.argwhere_A22],params[self.argwhere_S21],params[self.argwhere_S22]
-        if self.has_V21: V21=params[self.argwhere_V21] 
-        else: V21=self.V1
-        if self.has_V22: V22=params[self.argwhere_V22] 
-        else: V22=V21
-        if self.has_B2:  B2=params[self.argwhere_B2]   
-        else: B2=self.B1
-        uA21,uA22 = _softplus(A21), _softplus(A22)
-        # uS21,uS22 = _sigmoid_mapped(S21,self.dict_bound['S21']), _sigmoid_mapped(S22,self.dict_bound['S22'])
-        uS21 = _softplus(S21) + S_EPS
-        uS22 = uS21 + _softabs(S22) + S_EPS
-        uS21 = np.clip(uS21, S_EPS, S_MAX)
-        uS22 = np.clip(uS22, uS21 + S_EPS, S_MAX)
+        if np.any( params>1e100):  return -np.inf
+        if np.any(params<-1e100): return -np.inf
+        A21,A22,S21,S22 = (
+            params[self.iA21],
+            params[self.iA22],
+            params[self.iS21],
+            params[self.iS22],
+        )
+        V21 = params[self.iV21] if self.has_V21 else self.V1
+        V22 = params[self.iV22] if self.has_V22 else V21
+        B2  = params[self.iB2 ] if self.has_B2  else self.B1
+        
+        uA21 = _sigmoid_mapped(A21,self.dict_bound['A21'])
+        uA22 = _sigmoid_mapped(A22,self.dict_bound['A21'])
+        uS21 = self.dict_bound['S21'][0] + _softplus(S21)
+        uS22 = self.dict_bound['S21'][0] + _softplus(S22)
+        
         logl = self.log_L_2G(uA21,uA22,V21,V22,uS21,uS22,B2)
-        if not np.isfinite(logl):
-            return -np.inf
-        return logl
+        return logl if np.isfinite(logl) else -np.inf
 
     def array_to_dict_guess(self, params):
         return dict(zip(self.names_param, params))

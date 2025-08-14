@@ -70,6 +70,11 @@ class Plotter:
         except:
             return
         
+        iA21 = _idx(self.names_param, 'A21')
+        iA22 = _idx(self.names_param, 'A22')
+        iS21 = _idx(self.names_param, 'S21')
+        iS22 = _idx(self.names_param, 'S22')
+        
         if 'Skew_A21' in self.df:
             N = len(self.names_param)
             ax = fig.axes[iA21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A21'].item(),self.df['Kurt_A21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
@@ -310,16 +315,20 @@ class Plotter:
         At = An+Ab
         
         dict_resampled = {
-            'sn':sort_outliers(sn),
-            'sb':sort_outliers(sb),
-            'An':sort_outliers(An),
-            'Ab':sort_outliers(Ab),
-            'At':sort_outliers(At),
+            'sn':sn,
+            'sb':sb,
+            'An':An,
+            'Ab':Ab,
+            'At':At,
             
-            'sn/sb':sort_outliers(sn/sb),
-            'An/At':sort_outliers(An/At),
-            'log(sb-sn)':sort_outliers(np.log10(sb-sn)),
+            'sn/sb':sn/sb,
+            'An/At':An/At,
+            'log(sb-sn)':np.log10(sb-sn),
         }
+        
+        for keyy in dict_resampled.keys():
+            dict_resampled[keyy] = sort_outliers(dict_resampled[keyy])
+        
         # dict_resampled['sn/sb'] = dict_resampled['sn/sb'][dict_resampled['sn/sb']<0.9]
         # print(dict_resampled)
         
@@ -340,7 +349,7 @@ class Plotter:
             'An/At':[0,1],
             'log(sb-sn)':[0,2]
         }
-        
+                
         df = pd.DataFrame()
         
         df[key] = dict_resampled[key]

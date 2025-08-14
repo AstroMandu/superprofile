@@ -481,7 +481,7 @@ for homedir in homedirs:
     
     homedir = Path(homedir)
     path_output = None
-    # path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
+    path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
     
     # path_output = homedir.parent / f'{homedir.name}_2beam'
     # path_output = homedir.parent / f'{homedir.name}_2VFonly'
