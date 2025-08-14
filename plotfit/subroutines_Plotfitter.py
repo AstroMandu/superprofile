@@ -3,6 +3,10 @@ import numpy as np
 from scipy.stats import f, gaussian_kde
 from numba import njit
 
+S_EPS  = np.float64(1e-12)
+S_MAX = np.float64(1e3) 
+RAW_LIM = np.float64(40.0)
+
 @njit(fastmath=True, cache=True)
 def gauss(x, amp, mu, sig):
     val = amp * np.exp(-0.5*np.square((x-mu)/sig))
@@ -137,8 +141,8 @@ def log_L_2G_jit(x, y, inv_e_y, A21, A22, V21, V22, S21, S22, B2):
     return chisq_gauss2(y, model, inv_e_y)
 
 @njit(fastmath=True, cache=True)
-def _softplus(z):
-    return np.log1p(np.exp(-np.abs(z))) + np.maximum(z, 0.0)
+def _softplus(z, eps=S_EPS):
+    return np.log1p(np.exp(-np.abs(z))) + np.maximum(z, 0.0) + eps
 
 @njit(fastmath=True, cache=True)
 def _inv_softplus(y):
@@ -195,9 +199,28 @@ def _inv_bounded_tanh(x, bound):
 def _softabs(u):
     return np.logaddexp(u,-u) - np.log(2.0)
 
+
 def _inv_softabs(y):
-    z = np.exp(y)
-    return np.arccosh(z)
+    # y = log(cosh u) >= 0
+    y = np.asarray(y)
+    out = np.empty_like(y)
+
+    # threshold where exp(y) starts to risk overflow in double
+    y0 = np.float64(20.0)
+
+    small = y <= y0
+    large = ~small
+
+    # small: exact formula u = arcosh(exp(y))
+    if np.any(small):
+        z = np.exp(y[small])
+        out[small] = np.arccosh(z)
+
+    # large: asymptotic u ≈ y + log 2 (since cosh u ~ e^u/2)
+    if np.any(large):
+        out[large] = y[large] + np.log(2.0)
+
+    return out
 
 def _idx(names, key):
     idx = np.where(names == key)[0]
@@ -208,8 +231,11 @@ def demap_params_unconstrained(params, gmodel):
     def demap_A21(A21): return _softplus(A21)
     def demap_A22(A22): return _softplus(A22)
     def demap_S21_S22(S21,S22):
-        uS21 = _softplus(S21)
-        uS22 = _softabs(S22) + uS21
+        S21,S22 = _clip_raw(S21), _clip_raw(S22)
+        uS21 = _softplus(S21) + S_EPS
+        uS22 = _softabs(S22) + uS21 + S_EPS
+        uS21 = np.clip(uS21, S_EPS, S_MAX)
+        uS22 = np.clip(uS22, uS21 + S_EPS, S_MAX)
         return uS21, uS22
     names = gmodel.names_param
     iA21,iA22 = _idx(names,'A21'),_idx(names,'A22')
@@ -230,9 +256,11 @@ def map_params_unconstrained(params, gmodel):
     
     def map_A21(uA21): return _inv_softplus(uA21)
     def map_A22(uA22): return _inv_softplus(uA22)
-    def map_S21_S22(uS21,uS22):
-        S21 = _inv_softplus(uS21)
-        S22 = _inv_softabs(uS22-uS21)
+    def map_S21_S22(uS21, uS22):
+        uS21_eff = np.maximum(uS21 - S_EPS, S_EPS)
+        d_eff    = np.maximum(uS22 - uS21 - S_EPS, 0.0)
+        S21 = _inv_softplus(uS21_eff)
+        S22 = _inv_softabs(d_eff)
         return S21, S22
     
     names = gmodel.names_param
@@ -251,3 +279,9 @@ def map_params_unconstrained(params, gmodel):
         params_mapped[iS21],params_mapped[iS22] = map_S21_S22(params[iS21],params[iS22])
     
     return params_mapped
+
+@njit(fastmath=True, cache=True)
+def _clip_raw(u, L=RAW_LIM):
+    if u > L:   return L
+    if u < -L:  return -L
+    return u
