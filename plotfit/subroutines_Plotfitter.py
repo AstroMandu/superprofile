@@ -142,7 +142,7 @@ def _softplus(z):
 
 @njit(fastmath=True, cache=True)
 def _inv_softplus(y):
-    return y + np.log(-np.expm1(-y))
+    return y + np.log1p(-np.exp(-y))
 
 @njit(fastmath=True, cache=True)
 def _sigmoid_mapped(raw, bound):
@@ -179,6 +179,75 @@ def _inv_sigmoid_mapped(scaled, bound, eps=1e-12):
     x = np.clip(x, eps, 1.0 - eps)
     return np.log(x / (1.0 - x))
 
+@njit(fastmath=True, cache=True)
+def _bounded_tanh(u, bound):
+    a,b = bound
+    return a + (b-a) * (np.tanh(u)*0.5+0.5)
+
+def _inv_bounded_tanh(x, bound):
+    a,b = bound
+    # Clamp to avoid atanh hitting ±1 exactly due to float rounding
+    z = 2 * (x - a) / (b - a) - 1
+    z = np.clip(z, -1 + 1e-15, 1 - 1e-15)
+    return np.arctanh(z)    
+
+@njit(fastmath=True, cache=True)
+def _softabs(u):
+    return np.logaddexp(u,-u) - np.log(2.0)
+
+def _inv_softabs(y):
+    z = np.exp(y)
+    return np.arccosh(z)
+
 def _idx(names, key):
     idx = np.where(names == key)[0]
     return int(idx[0]) if idx.size > 0 else None
+
+def demap_params_unconstrained(params, gmodel):
+    
+    def demap_A21(A21): return _softplus(A21)
+    def demap_A22(A22): return _softplus(A22)
+    def demap_S21_S22(S21,S22):
+        uS21 = _softplus(S21)
+        uS22 = _softabs(S22) + uS21
+        return uS21, uS22
+    names = gmodel.names_param
+    iA21,iA22 = _idx(names,'A21'),_idx(names,'A22')
+    iS21,iS22 = _idx(names,'S21'),_idx(names,'S22')
+    params_demapped = params.copy()
+    if len(params.shape)>1:
+        params_demapped[:,iA21] = demap_A21(params[:,iA21])
+        params_demapped[:,iA22] = demap_A22(params[:,iA22])
+        params_demapped[:,iS21],params_demapped[:,iS22] = demap_S21_S22(params[:,iS21],params[:,iS22])
+    else:
+        params_demapped[iA21] = demap_A21(params[iA21])
+        params_demapped[iA22] = demap_A21(params[iA22])
+        params_demapped[iS21],params_demapped[iS22] = demap_S21_S22(params[iS21],params[iS22])
+    
+    return params_demapped
+
+def map_params_unconstrained(params, gmodel):
+    
+    def map_A21(uA21): return _inv_softplus(uA21)
+    def map_A22(uA22): return _inv_softplus(uA22)
+    def map_S21_S22(uS21,uS22):
+        S21 = _inv_softplus(uS21)
+        S22 = _inv_softabs(uS22-uS21)
+        return S21, S22
+    
+    names = gmodel.names_param
+    iA21,iA22 = _idx(names,'A21'),_idx(names,'A22')
+    iS21,iS22 = _idx(names,'S21'),_idx(names,'S22')
+    
+    params_mapped = params.copy()
+    
+    if len(params.shape)>1:
+        params_mapped[:,iA21] = map_A21(params[:,iA21])
+        params_mapped[:,iA22] = map_A22(params[:,iA22])
+        params_mapped[:,iS21],params_mapped[:,iS22] = map_S21_S22(params[:,iS21],params[:,iS22])
+    else:
+        params_mapped[iA21] = map_A21(params[iA21])
+        params_mapped[iA22] = map_A21(params[iA22])
+        params_mapped[iS21],params_mapped[iS22] = map_S21_S22(params[iS21],params[iS22])
+    
+    return params_mapped

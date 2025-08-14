@@ -7,7 +7,7 @@ from chainconsumer import Chain, ChainConsumer, Truth
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageFile
 
-from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area, _idx, _softplus, _inv_softplus, _sigmoid_mapped
+from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area, _idx, _softplus, _inv_softplus, _sigmoid_mapped, demap_params_unconstrained
 import pandas as pd
 import pylab as plt
 import time
@@ -57,13 +57,7 @@ class Plotter:
         
         flat_samples = self.sampler.get_chain(discard=self.burnin, flat=True, thin=self.thin)
         if self.unconstrained:
-            iA21,iA22 = _idx(self.names_param,'A21'),_idx(self.names_param,'A22')
-            iS21,iS22 = _idx(self.names_param,'S21'),_idx(self.names_param,'S22')
-            flat_samples[:,iA21] = _softplus(flat_samples[:,iA21])
-            flat_samples[:,iA22] = _softplus(flat_samples[:,iA22])
-            flat_samples[:,iS21] = _sigmoid_mapped(flat_samples[:,iS21], self.gmodel.dict_bound['S21'][0],),self.gmodel.dict_bound['S21'][1]
-            flat_samples[:,iS22] = _softplus(flat_samples[:,iS22]) + flat_samples[:,iS21]
-            
+            flat_samples = demap_params_unconstrained(flat_samples, self.gmodel)
         df = pd.DataFrame()
         for i, label in enumerate(self.names_param):
             df[label] = flat_samples[:,i]
