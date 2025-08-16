@@ -1,5 +1,6 @@
 import numpy as np
-from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw, _idx
+from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw, _idx,check_sanity, check_sanity_softplus
+from math import isfinite
 from pprint import pprint
 
 S_EPS  = np.float64(1e-12) 
@@ -106,15 +107,17 @@ class Gmodel:
         return self.log_L_1G(A1,V1,S1,B1)
     
     def log_prob_1G_unconstrained(self, params):
+        if not check_sanity(params): return -np.inf
         A1,S1,B1 = params[self.iA1], params[self.iS1], params[self.iB1]
         if self.has_V1: V1=params[self.iV1] 
         else: V1=self.V1
-        uA1 = _softplus(A1)
-        uS1 = _softplus(S1)
-        logl = self.log_L_1G(uA1,V1,uS1,B1)
-        if not np.isfinite(logl):
-            return -np.inf
-        return logl
+        dict_bound = self.dict_bound
+        uA1 = _sigmoid_mapped(A1,dict_bound['A1'])
+        uV1 = _sigmoid_mapped(V1,dict_bound['V1'])
+        uS1 = _sigmoid_mapped(S1,dict_bound['S1'])
+        uB1 = _sigmoid_mapped(B1,dict_bound['B1'])
+        logl = self.log_L_1G(uA1,uV1,uS1,uB1)
+        return logl if isfinite(logl) else -np.inf
     
     def log_prob_2G(self, params):
         A21,A22,S21,S22 = params[self.iA21],params[self.iA22],params[self.iS21],params[self.iS22]
@@ -131,8 +134,7 @@ class Gmodel:
         return self.log_L_2G(A21,A22,V21,V22,S21,S22,B2)
     
     def log_prob_2G_unconstrained(self, params):
-        if np.any( params>1e100):  return -np.inf
-        if np.any(params<-1e100): return -np.inf
+        if not check_sanity(params): return -np.inf
         A21,A22,S21,S22 = (
             params[self.iA21],
             params[self.iA22],
@@ -143,13 +145,23 @@ class Gmodel:
         V22 = params[self.iV22] if self.has_V22 else V21
         B2  = params[self.iB2 ] if self.has_B2  else self.B1
         
-        uA21 = _sigmoid_mapped(A21,self.dict_bound['A21'])
-        uA22 = _sigmoid_mapped(A22,self.dict_bound['A21'])
-        uS21 = self.dict_bound['S21'][0] + _softplus(S21)
-        uS22 = self.dict_bound['S21'][0] + _softplus(S22)
+        dict_bound = self.dict_bound
+        boundA21 = dict_bound['A21']
+        boundA22 = dict_bound['A22']
+        boundV2X = dict_bound['V21']
+        boundS2X = dict_bound['S21']
+        boundB2  = dict_bound['B2']
         
-        logl = self.log_L_2G(uA21,uA22,V21,V22,uS21,uS22,B2)
-        return logl if np.isfinite(logl) else -np.inf
+        uA21 = _sigmoid_mapped(A21,boundA21)
+        uA22 = _sigmoid_mapped(A22,boundA22)
+        uV21 = _sigmoid_mapped(V21,boundV2X)
+        uV22 = _sigmoid_mapped(V22,boundV2X)
+        uS21 = _sigmoid_mapped(S21,boundS2X)
+        uS22 = _sigmoid_mapped(S22,boundS2X)
+        uB2  = _sigmoid_mapped(B2, boundB2)
+        
+        logl = self.log_L_2G(uA21,uA22,uV21,uV22,uS21,uS22,uB2)
+        return logl if isfinite(logl) else -np.inf
 
     def array_to_dict_guess(self, params):
         return dict(zip(self.names_param, params))

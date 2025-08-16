@@ -111,16 +111,21 @@ def multirun_clfy(names_cube, num_cores=1):
     
     pbar = tqdm(names_cube)
     lists = np.array(names_cube, dtype=object)
-    pool = multiprocessing.Pool(processes=num_cores)
     
-    with tqdm(total=len(lists), leave=True) as pbar:
-        for _ in pool.imap_unordered(task_clfy, lists):
-            pbar.update()
+    if len(lists)==1:
+        task_clfy(lists[0])
+    else:
+        pool = multiprocessing.Pool(processes=num_cores)
+        with tqdm(total=len(lists), leave=True) as pbar:
+            for _ in pool.imap_unordered(task_clfy, lists):
+                pbar.update()
+                
+        pool.close()
+        pool.join()
             
     print('[Pipe_superprofile] BAYGAUD classify end')
 
-    pool.close()
-    pool.join()
+    
     return
 
 def periodic_message(interval, stop_event):
@@ -147,7 +152,10 @@ def periodic_message(interval, stop_event):
             print(e)
             continue
         
-        df_stat.to_string(dict_glob['path_output']/'Plotfit_stat_{}.csv'.format(dict_glob['seed']), index=False)
+        path_df_stat = dict_glob['path_output']/'Plotfit_stat_{}.csv'.format(dict_glob['seed'])
+        with open(path_df_stat, "w") as f:
+            f.write(f"# {dict_glob['suffix']}\n")
+            df_stat.to_string(f, index=False)
 
 def multirun_main(names_cube, num_cores=1):
     
@@ -188,19 +196,23 @@ def multirun_main(names_cube, num_cores=1):
     
     pbar = tqdm(names_cube)
     lists = np.array(names_cube, dtype=object)
-    pool = multiprocessing.Pool(processes=num_cores, maxtasksperchild=maxtaskperchild)
     
     interval = 1
     stop_event = Event()
     timer_thread = Thread(target=periodic_message, args=(interval, stop_event))
     timer_thread.start()
     
-    with tqdm(total=len(lists), leave=True, desc=suffix) as pbar:
-        for _ in pool.imap_unordered(task_main, lists):
-            pbar.update()
-
-    pool.close()
-    pool.join()
+    if len(lists)==1:
+        task_main(lists[0])
+    else:
+        pool = multiprocessing.Pool(processes=num_cores, maxtasksperchild=maxtaskperchild)
+        
+        with tqdm(total=len(lists), leave=True, desc=suffix) as pbar:
+            for _ in pool.imap_unordered(task_main, lists):
+                pbar.update()
+        
+        pool.close()
+        pool.join()
     
     stop_event.set()
     timer_thread.join()
@@ -383,10 +395,10 @@ homedirs = [
     # path_data/'test_chanres/5.16kms',
     # path_data/'test_chanres/10.3kms',
     # path_data+'/Rory/RPfiles',
-    '/home/mskim/workspace/research/data/AVID'
+    # '/home/mskim/workspace/research/data/AVID'
     # '/home/mskim/workspace/research/data/AVID_halfbeam'
     
-    # '/home/mskim/workspace/research/data/test'
+    '/home/mskim/workspace/research/data/test'
     # '/home/mskim/workspace/research/data/test_LBFGSB'
     # '/home/mskim/workspace/research/data/test_neldermead'
     # '/home/mskim/workspace/research/data/test_SNR3_snch_sbbw'
@@ -400,10 +412,10 @@ nametype_galaxy = '*'
 # multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.6,2.0, 0.1,0.3,0.5,0.7,0.9,1.1,1.3,1.4,1.5,1.7,1.8,1.9]#, 2.1,2.2,2.3,2.4,2.5,2.6,2.7,2.8,2.9,3.0]
 # multipliers = [0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2.0]
 # multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.05)]
-multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.1)]
+# multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.1)]
 
 # multipliers = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
-# multipliers = [0.4]
+multipliers = [0.4]
 
 # multipliers = [0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
 
@@ -414,8 +426,8 @@ multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.1)]
 # multipliers = np.flip(multipliers[1::2])
 # multipliers = np.flip(multipliers)
 
-# col_radius = 'r25';      radtag='r25'
-col_radius = 'RHI(kpc)'; radtag='RHI'
+col_radius = 'r25';      radtag='r25'
+# col_radius = 'RHI(kpc)'; radtag='RHI'
 
 suffix = '_'
 
@@ -428,21 +440,22 @@ use_secondary_vf = True; #suffix+='VFsec_'
 
 truth_from_resampling = True
 
-num_cores = 33
+num_cores = 25
 
 bool_overwrite     = 1
 remove_temp        = 1
 
-overwrite_classify = 1
+overwrite_classify = 0
 bool_do_clfy       = 1
 
-bool_do_whole  = 0
+bool_do_whole  = 1
 bool_do_inner  = 0
 bool_do_outer  = 0
-bool_do_rings  = 1
+bool_do_rings  = 0
 
 bool_do_angles = 0
-angles=[0,15,30,45,60,75,90,105,120,135,150,165,180,195,210,225,240,255,270,285,300,315,330,345]
+# angles=[0,15,30,45,60,75,90,105,120,135,150,165,180,195,210,225,240,255,270,285,300,315,330,345]
+angles = [75]
 
 # angles = angles[::2]
 # angles = np.flip(angles[1::2])
@@ -469,8 +482,8 @@ statV22 = 'r' if dict_glob['dict_params']['V22']=='free' else 'x'
 statB2  = 'r' if dict_glob['dict_params']['B2' ]=='free' else 'x'
 dict_glob['pbar_resample'] = False
 dict_glob['nsample_resample'] = nsample_resample
-dict_glob['mode'] = 'baygaud'
-# dict_glob['mode'] = 'hermite'
+# dict_glob['mode'] = 'baygaud'
+dict_glob['mode'] = 'hermite'
 # dict_glob['vdisp_low_intrinsic'] = 1.5
 dict_glob['vdisp_low_intrinsic'] = 0
 dict_glob['radtag'] = radtag
@@ -481,7 +494,7 @@ for homedir in homedirs:
     
     homedir = Path(homedir)
     path_output = None
-    path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
+    # path_output = homedir.parent / f'V21{statV21}V22{statV22}B2{statB2}_{homedir.name}'
     
     # path_output = homedir.parent / f'{homedir.name}_2beam'
     # path_output = homedir.parent / f'{homedir.name}_2VFonly'
@@ -556,13 +569,13 @@ for homedir in homedirs:
         for multiplier in multipliers: do_rings(multiplier)
                 
     if bool_do_angles:
-        for angle in angles: do_angles(angle,180)
-        for angle in angles: do_angles_O05(angle,180)
-        for angle in angles: do_angles_O10(angle,180)
+        # for angle in angles: do_angles(angle,180)
+        # for angle in angles: do_angles_O05(angle,180)
+        # for angle in angles: do_angles_O10(angle,180)
         
         # for angle in angles: do_angles(angle,90)
         # for angle in angles: do_angles_O05(angle,90)
-        # for angle in angles: do_angles_O10(angle,90)
+        for angle in angles: do_angles_O10(angle,90)
         
 
     

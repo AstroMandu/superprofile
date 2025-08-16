@@ -7,7 +7,7 @@ from chainconsumer import Chain, ChainConsumer, Truth
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageFile
 
-from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area, _idx, _softplus, _inv_softplus, _sigmoid_mapped, demap_params_unconstrained
+from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area, _idx, _softplus, _inv_softplus, _sigmoid_mapped, demap_params2G_unconstrained
 import pandas as pd
 import pylab as plt
 import time
@@ -57,7 +57,7 @@ class Plotter:
         
         flat_samples = self.sampler.get_chain(discard=self.burnin, flat=True, thin=self.thin)
         if self.unconstrained:
-            flat_samples = demap_params_unconstrained(flat_samples, self.gmodel)
+            flat_samples = demap_params2G_unconstrained(flat_samples, self.gmodel)
         df = pd.DataFrame()
         for i, label in enumerate(self.names_param):
             df[label] = flat_samples[:,i]

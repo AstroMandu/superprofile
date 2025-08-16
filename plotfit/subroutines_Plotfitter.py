@@ -2,6 +2,7 @@
 import numpy as np
 from scipy.stats import f, gaussian_kde
 from numba import njit
+import math
 
 S_EPS  = np.float64(1e-12)
 S_MAX = np.float64(1e3) 
@@ -148,40 +149,25 @@ def _softplus(z, eps=S_EPS):
 def _inv_softplus(y):
     return y + np.log1p(-np.exp(-y))
 
+# tanh-based sigmoid on (−∞,∞) → (0,1)
+@njit(fastmath=True, cache=True, inline='always')
+def _sigmoid01_tanh(z):
+    return 0.5 * (np.tanh(0.5 * z) + 1.0)
+
+# mapped sigmoid: (−∞,∞) → (lo, hi)
 @njit(fastmath=True, cache=True)
 def _sigmoid_mapped(raw, bound):
-    """
-    Map raw real values -> scaled in (lo, hi) using a logistic function.
-    
-    Parameters
-    ----------
-    raw : float or ndarray
-        Unbounded input values.
-    lo, hi : float
-        Lower and upper bounds of the target range.
-    """
-    lo,hi = bound
-    return lo + (hi - lo) / (1.0 + np.exp(-raw))
+    lo = float(bound[0]); hi = float(bound[1])
+    return lo + (hi - lo) * _sigmoid01_tanh(raw)
 
 def _inv_sigmoid_mapped(scaled, bound, eps=1e-12):
-    """
-    Inverse of scaled_sigmoid: map scaled in (lo, hi) -> raw real values.
-    
-    Parameters
-    ----------
-    scaled : float or ndarray
-        Values in (lo, hi) to map back to ℝ.
-    lo, hi : float
-        Same bounds as used in scaled_sigmoid.
-    eps : float
-        Small epsilon to keep away from exactly lo or hi to avoid infs.
-    """
-    lo,hi=bound
-    # Normalize to (0, 1)
-    x = (scaled - lo) / (hi - lo)
-    # Clip to avoid log(0) or log(∞)
-    x = np.clip(x, eps, 1.0 - eps)
-    return np.log(x / (1.0 - x))
+    lo = float(bound[0]); hi = float(bound[1])
+    span = hi - lo
+    x = (scaled - lo) / span                 # (0,1)
+    x = np.clip(x, eps, 1.0 - eps)           # keep away from endpoints
+    # tanh inverse: z = 2 * atanh(2x - 1)
+    y = 2.0 * x - 1.0                        # (-1,1)
+    return 2.0 * np.arctanh(y)
 
 @njit(fastmath=True, cache=True)
 def _bounded_tanh(u, bound):
@@ -272,55 +258,88 @@ def relabel_by_width(samples, names):
 
     return work[0] if one_d else work
 
-def demap_params_unconstrained(params, gmodel):
-    # def demap_A21(A21): return _softplus(A21)
-    # def demap_A22(A22): return _softplus(A22)
-    
-    def demap_A21(A21): return _sigmoid_mapped(A21,gmodel.dict_bound['A21'])
-    def demap_A22(A22): return _sigmoid_mapped(A22,gmodel.dict_bound['A21'])
-    
-    def demap_S21_S22(S21,S22):
-        # S21,S22 = _clip_raw(S21), _clip_raw(S22)
-        # uS21 = _softplus(S21) + S_EPS
-        # uS22 = _softabs(S22) + uS21 + S_EPS
-        # uS21 = np.clip(uS21, S_EPS, S_MAX)
-        # uS22 = np.clip(uS22, uS21 + S_EPS, S_MAX)
-        uS21 = gmodel.dict_bound['S21'][0] + _softplus(S21)
-        uS22 = gmodel.dict_bound['S21'][0] + _softplus(S22)
-        return uS21, uS22
+def demap_params1G_unconstrained(params, gmodel):
+    def demap_A1(A1): return _sigmoid_mapped(A1,gmodel.dict_bound['A1'])
+    def demap_V1(V1): return _sigmoid_mapped(V1,gmodel.dict_bound['V1'])
+    def demap_S1(S1): return _sigmoid_mapped(S1,gmodel.dict_bound['S1'])
+    def demap_B1(B1): return _sigmoid_mapped(B1,gmodel.dict_bound['B1'])
     params_demapped = params.copy()
     if len(params.shape)>1:
-        params_demapped[:,gmodel.iA21] = demap_A21(params[:,gmodel.iA21])
-        params_demapped[:,gmodel.iA22] = demap_A22(params[:,gmodel.iA22])
-        params_demapped[:,gmodel.iS21],   params_demapped[:,gmodel.iS22] = demap_S21_S22(params[:,gmodel.iS21],params[:,gmodel.iS22])
+        params_demapped[:,gmodel.iA1] = demap_A1(params[:,gmodel.iA1])
+        params_demapped[:,gmodel.iV1] = demap_V1(params[:,gmodel.iV1])
+        params_demapped[:,gmodel.iS1] = demap_S1(params[:,gmodel.iS1])
+        params_demapped[:,gmodel.iB1] = demap_B1(params[:,gmodel.iB1])
     else:
-        params_demapped[gmodel.iA21] = demap_A21(params[gmodel.iA21])
-        params_demapped[gmodel.iA22] = demap_A22(params[gmodel.iA22])
-        params_demapped[gmodel.iS21],params_demapped[gmodel.iS22] = demap_S21_S22(params[gmodel.iS21],params[gmodel.iS22])
+        params_demapped[gmodel.iA1] = demap_A1(params[gmodel.iA1])
+        params_demapped[gmodel.iV1] = demap_V1(params[gmodel.iV1])
+        params_demapped[gmodel.iS1] = demap_S1(params[gmodel.iS1])
+        params_demapped[gmodel.iB1] = demap_B1(params[gmodel.iB1])
     return params_demapped
 
-def map_params_unconstrained(params, gmodel):
-    # def map_A21(uA21): return _inv_softplus(uA21)
-    # def map_A22(uA22): return _inv_softplus(uA22)
-    def map_A21(uA21): return _inv_sigmoid_mapped(uA21,gmodel.dict_bound['A21'])
-    def map_A22(uA22): return _inv_sigmoid_mapped(uA22,gmodel.dict_bound['A21'])
-    def map_S21_S22(uS21, uS22):
-        # uS21_eff = np.maximum(uS21 - S_EPS, S_EPS)
-        # d_eff    = np.maximum(uS22 - uS21 - S_EPS, 0.0)
-        # S21 = _inv_softplus(uS21_eff)
-        # S22 = _inv_softabs(d_eff)
-        S21 = _inv_softplus(uS21 - gmodel.dict_bound['S21'][0])
-        S22 = _inv_softplus(uS22 - gmodel.dict_bound['S21'][0])
-        return S21, S22
+def map_params1G_unconstrained(params, gmodel):
+    def map_A1(A1): return _inv_sigmoid_mapped(A1,gmodel.dict_bound['A1'])
+    def map_V1(V1): return _inv_sigmoid_mapped(V1,gmodel.dict_bound['V1'])
+    def map_S1(S1): return _inv_sigmoid_mapped(S1,gmodel.dict_bound['S1'])
+    def map_B1(B1): return _inv_sigmoid_mapped(B1,gmodel.dict_bound['B1'])
     params_mapped = params.copy()
     if len(params.shape)>1:
-        params_mapped[:,gmodel.iA21] = map_A21(params[:,gmodel.iA21])
-        params_mapped[:,gmodel.iA22] = map_A22(params[:,gmodel.iA22])
-        params_mapped[:,gmodel.iS21],params_mapped[:,gmodel.iS22] = map_S21_S22(params[:,gmodel.iS21],params[:,gmodel.iS22])
+        params_mapped[:,gmodel.iA1] = map_A1(params[:,gmodel.iA1])
+        params_mapped[:,gmodel.iV1] = map_V1(params[:,gmodel.iV1])
+        params_mapped[:,gmodel.iS1] = map_S1(params[:,gmodel.iS1])
+        params_mapped[:,gmodel.iB1] = map_B1(params[:,gmodel.iB1])
     else:
-        params_mapped[gmodel.iA21] = map_A21(params[gmodel.iA21])
-        params_mapped[gmodel.iA22] = map_A22(params[gmodel.iA22])
-        params_mapped[gmodel.iS21],params_mapped[gmodel.iS22] = map_S21_S22(params[gmodel.iS21],params[gmodel.iS22])
+        params_mapped[gmodel.iA1] = map_A1(params[gmodel.iA1])
+        params_mapped[gmodel.iV1] = map_V1(params[gmodel.iV1])
+        params_mapped[gmodel.iS1] = map_S1(params[gmodel.iS1])
+        params_mapped[gmodel.iB1] = map_B1(params[gmodel.iB1])
+    return params_mapped
+
+def demap_params2G_unconstrained(params, gmodel):
+    def demap_A2X(A2X): return _sigmoid_mapped(A2X,gmodel.dict_bound['A21'])
+    def demap_V2X(V2X): return _sigmoid_mapped(V2X,gmodel.dict_bound['V21'])
+    def demap_S2X(S2X): return _sigmoid_mapped(S2X,gmodel.dict_bound['S21'])
+    def demap_B2(B2):   return _sigmoid_mapped(B2, gmodel.dict_bound['B2'])
+    params_demapped = params.copy()
+    if len(params.shape)>1:
+        params_demapped[:,gmodel.iA21] = demap_A2X(params[:,gmodel.iA21])
+        params_demapped[:,gmodel.iA22] = demap_A2X(params[:,gmodel.iA22])
+        params_demapped[:,gmodel.iS21] = demap_S2X(params[:,gmodel.iS21])
+        params_demapped[:,gmodel.iS22] = demap_S2X(params[:,gmodel.iS22])
+        if gmodel.has_V21: params_demapped[:,gmodel.iV21] = demap_V2X(params[:,gmodel.iV21])
+        if gmodel.has_V22: params_demapped[:,gmodel.iV22] = demap_V2X(params[:,gmodel.iV22])
+        if gmodel.has_B2:  params_demapped[:,gmodel.iB2]  = demap_B2( params[:,gmodel.iB2])
+    else:
+        params_demapped[gmodel.iA21] = demap_A2X(params[gmodel.iA21])
+        params_demapped[gmodel.iA22] = demap_A2X(params[gmodel.iA22])
+        params_demapped[gmodel.iS21] = demap_S2X(params[gmodel.iS21])
+        params_demapped[gmodel.iS22] = demap_S2X(params[gmodel.iS22])
+        if gmodel.has_V21: params_demapped[gmodel.iV21] = demap_V2X(params[gmodel.iV21])
+        if gmodel.has_V22: params_demapped[gmodel.iV22] = demap_V2X(params[gmodel.iV22])
+        if gmodel.has_B2:  params_demapped[gmodel.iB2]  = demap_B2( params[gmodel.iB2])
+    return params_demapped
+
+def map_params2G_unconstrained(params, gmodel):
+    def map_A2X(A2X): return _inv_sigmoid_mapped(A2X,gmodel.dict_bound['A21'])
+    def map_V2X(V2X): return _inv_sigmoid_mapped(V2X,gmodel.dict_bound['V21'])
+    def map_S2X(S2X): return _inv_sigmoid_mapped(S2X,gmodel.dict_bound['S21'])
+    def map_B2(B2):   return _inv_sigmoid_mapped(B2, gmodel.dict_bound['B2'])
+    params_mapped = params.copy()
+    if len(params.shape)>1:
+        params_mapped[:,gmodel.iA21] = map_A2X(params[:,gmodel.iA21])
+        params_mapped[:,gmodel.iA22] = map_A2X(params[:,gmodel.iA22])
+        params_mapped[:,gmodel.iS21] = map_S2X(params[:,gmodel.iS21])
+        params_mapped[:,gmodel.iS22] = map_S2X(params[:,gmodel.iS22])
+        if gmodel.has_V21: params_mapped[:,gmodel.iV21] = map_V2X(params[:,gmodel.iV21])
+        if gmodel.has_V22: params_mapped[:,gmodel.iV22] = map_V2X(params[:,gmodel.iV22])
+        if gmodel.has_B2:  params_mapped[:,gmodel.iB2]  = map_B2( params[:,gmodel.iB2])
+    else:
+        params_mapped[gmodel.iA21] = map_A2X(params[gmodel.iA21])
+        params_mapped[gmodel.iA22] = map_A2X(params[gmodel.iA22])
+        params_mapped[gmodel.iS21] = map_S2X(params[gmodel.iS21])
+        params_mapped[gmodel.iS22] = map_S2X(params[gmodel.iS22])
+        if gmodel.has_V21: params_mapped[gmodel.iV21] = map_V2X(params[gmodel.iV21])
+        if gmodel.has_V22: params_mapped[gmodel.iV22] = map_V2X(params[gmodel.iV22])
+        if gmodel.has_B2:  params_mapped[gmodel.iB2]  = map_B2( params[gmodel.iB2])
     return params_mapped
 
 @njit(fastmath=True, cache=True)
@@ -330,3 +349,24 @@ def _clip_raw(u, L=RAW_LIM):
     return u
 
 
+def orthogonalize_rows(pos, magnitude=1e-2):
+    # Center
+    C = pos - pos.mean(axis=0, keepdims=True)
+    nwalkers, ndim = C.shape
+    # Build an orthonormal basis in R^(nwalkers) and project a small component
+    Q, _ = np.linalg.qr(np.random.randn(nwalkers, nwalkers))
+    bump = Q[:, :ndim] * magnitude  # nwalkers x ndim
+    return pos + bump
+
+@njit(fastmath=True, cache=True)
+def check_sanity(params):
+    for param in params:
+        if param<-8 or param>8: return False
+    return True
+
+
+@njit(fastmath=True, cache=True)
+def check_sanity_softplus(params):
+    for param in params:
+        if param<-20 or param>1e10: return False
+    return True

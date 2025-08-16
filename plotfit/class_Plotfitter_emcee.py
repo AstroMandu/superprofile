@@ -46,8 +46,10 @@ from .subroutines_Plotfitter import (
     get_mode,
     sort_outliers,
     _softplus, _inv_softplus, _idx,
-    map_params_unconstrained, demap_params_unconstrained,
-    relabel_by_width
+    map_params1G_unconstrained, demap_params1G_unconstrained,
+    map_params2G_unconstrained, demap_params2G_unconstrained,
+    relabel_by_width,
+    orthogonalize_rows
 )
 
 
@@ -228,9 +230,6 @@ class Plotfit:
                 os.remove(path_stat)
             except Exception:
                 pass
-            
-
-    
 
     # -----------------------------
     # Diagnostics / plotting
@@ -244,7 +243,7 @@ class Plotfit:
             params_dict = gmodel.array_to_dict_guess(params)
             if self.unconstrained:
                 params_mapped = params_dict.copy()
-                params_demapped = relabel_by_width(demap_params_unconstrained(params,gmodel),gmodel.names_param)
+                params_demapped = relabel_by_width(demap_params2G_unconstrained(params,gmodel),gmodel.names_param)
                 
                 params_dict     = gmodel.array_to_dict_guess(params_demapped)
             else:
@@ -384,8 +383,8 @@ class Plotfit:
                 # converged = np.all(tau * self.slope_tau < iteration)
                 # converged &= np.all(np.abs(self.old_tau - tau) / tau < 0.01)
                 
-                converged  = np.any(tau * self.slope_tau < iteration)
-                converged &= np.any(np.abs(self.old_tau - tau) / tau < 0.01)
+                converged  = np.all(tau * self.slope_tau < iteration)
+                converged &= np.all(np.abs(self.old_tau - tau) / tau < 0.01)
 
         self.old_tau = tau
         index = int(iteration / self.testlength)
@@ -421,21 +420,19 @@ class Plotfit:
             names_param = np.array(["A1", "V1", "S1", "B1"])  # with V1
 
         dict_bound = {
-            "A1": np.array([0, 1.5]) * float(np.nanmax(yy)),
-            "V1": np.array([-3 * self.chansep, 3 * self.chansep]),
+            "A1": np.array([0, 1.5]) * self.ymax,
+            "V1": np.array([self.xmin,self.xmax]),
             "S1": np.array([self.dispmin, self.dispmax]),
-            "B1": np.array([-3.0, 3.0]) * float(np.nanmax(yy)),
+            "B1": np.array([-1.0, 1.0]) * self.ymax,
         }
         
         if guess is None:
-            guess = np.array([np.nanmax(yy), 0.0, 10.0, 0.0])[: len(names_param)]
+            guess = np.array([self.ymax, 0.0, 20.0, 0.0])[: len(names_param)]
 
         gmodel = Gmodel(xx, yy, e_y, names_param, dict_bound)
         if self.unconstrained:
             gmodel.log_prob = gmodel.log_prob_1G_unconstrained
-            for i,name in enumerate(gmodel.names_param):
-                if name[0]=='A': guess[i] = _inv_softplus(guess[i])
-                if name[0]=='S': guess[i] = _inv_softplus(guess[i])
+            guess = map_params1G_unconstrained(guess,gmodel)
         else:
             gmodel.log_prob = gmodel.log_prob_1G
 
@@ -443,10 +440,8 @@ class Plotfit:
         
         resx = res.x
         if self.unconstrained:
-            for i,name in enumerate(gmodel.names_param):
-                if name[0]=='A': resx[i] = _softplus(resx[i])
-                if name[0]=='S': resx[i] = _softplus(resx[i])
-                
+            resx = demap_params1G_unconstrained(resx, gmodel)
+            
         if return_gmodel:
             return gmodel.array_to_dict_guess(resx), gmodel
         return gmodel.array_to_dict_guess(resx)
@@ -473,17 +468,18 @@ class Plotfit:
     def fill_df_emcee(self, sampler: emcee.EnsembleSampler, names: np.ndarray, burnin: int, thin: int = 1) -> None:
         if thin == 0:
             thin = 1
-        flat_samples = sampler.get_chain(discard=burnin, flat=True, thin=thin)
+        flat_samples_mapped = sampler.get_chain(discard=burnin, flat=True, thin=thin)
         log_probs = sampler.get_log_prob(discard=burnin, flat=True, thin=thin)
         max_prob_index = int(np.nanargmax(log_probs))
         
         if self.unconstrained:
+            flat_samples = flat_samples_mapped.copy()
             if 'A1' in names:
-                iA1,iS1 = _idx(names,'A1'),_idx(names,'S1')
-                flat_samples[:,iA1] = _softplus(flat_samples[:,iA1])
-                flat_samples[:,iS1] = _softplus(flat_samples[:,iS1])
+                flat_samples = demap_params1G_unconstrained(flat_samples_mapped, self.gmodel)
             if 'A21' in names:
-                flat_samples = relabel_by_width(demap_params_unconstrained(flat_samples, self.gmodel),self.gmodel.names_param)
+                flat_samples = relabel_by_width(demap_params2G_unconstrained(flat_samples_mapped, self.gmodel),self.gmodel.names_param)
+        else:
+            flat_samples = flat_samples_mapped.copy()
                 
         if self.statistics == "median":
             for i, label in enumerate(names):
@@ -532,31 +528,33 @@ class Plotfit:
         e_y = self.e_y if e_y is None else e_y
 
         res_1G, gmodel = self.makefit_1G_minimize(xx, yy, e_y, guess=guess, return_gmodel=True)
-        guess_vec = [res_1G[param] for param in gmodel.names_param]
+        guess_vec = np.float64([res_1G[param] for param in gmodel.names_param])
         nwalkers = max(4, int(len(guess_vec) * 2))
         ndim = len(guess_vec)
         
+        lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
+        ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+        
         if self.unconstrained:
-            iA1,iS1 = _idx(gmodel.names_param,'A1'),_idx(gmodel.names_param,'S1')
-            guess_vec[iA1] = _inv_softplus(guess_vec[iA1])
-            guess_vec[iS1] = _inv_softplus(guess_vec[iS1])
-            pos = guess_vec + 0.1*np.random.randn(nwalkers,ndim)
+            guess_vec = np.clip(guess_vec, lb,ub)
+            guess_vec = map_params1G_unconstrained(guess_vec,gmodel)
+            pos = guess_vec + np.random.randn(nwalkers,ndim)
             log_prob_1G = gmodel.log_prob_1G_unconstrained
         else:
             # Clip initial walkers to bounds
-            lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
-            ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+
             pos = np.clip(np.array(guess_vec) + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
             log_prob_1G = gmodel.log_prob_1G
         
-        self.gmodel = gmodel
+        self.gmodel    = gmodel
+        self.gmodel_1G = gmodel
         self.stat = "1GFIT"
 
         sampler = emcee.EnsembleSampler(
             nwalkers,
             ndim,
             log_prob_1G,
-            # moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
+            moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
         )
 
         # Reset autocorr tracking for this run length
@@ -569,10 +567,10 @@ class Plotfit:
                 # Map & print the bad walkers
                 pos_mapped = bad_coords.copy()
                 if self.unconstrained:
-                    pos_mapped[:, iA1] = _softplus(pos_mapped[:, iA1])
-                    pos_mapped[:, iS1] = _softplus(pos_mapped[:, iS1])
+                    pos_mapped = demap_params1G_unconstrained(pos_mapped, gmodel)
                 for p_map, p_raw in zip(pos_mapped, bad_coords):
-                    print(gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
+                    print(self.name_cube, gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
+                    self.print_diagnose_params()
                 break  # stop immediately so you can debug
             
             if sampler.iteration % self.testlength:
@@ -612,13 +610,13 @@ class Plotfit:
         guess_map = {
             # "A21": dict_1Gfit["A1"] * 0.45,
             # "A22": dict_1Gfit["A1"] * 0.45,
-            "A21": dict_1Gfit["A1"] * 0.8,
-            "A22": dict_1Gfit["A1"] * 0.1,
+            "A21": dict_1Gfit["A1"] * 0.7,
+            "A22": dict_1Gfit["A1"] * 0.2,
             "V21": dict_1Gfit["V1"],
             "V22": dict_1Gfit["V1"],
-            "S21": dict_1Gfit["S1"],
+            "S21": dict_1Gfit["S1"]*0.8,
             "S22": dict_1Gfit["S1"]*1.5,
-            "B2": dict_1Gfit["B1"],
+            "B2":  dict_1Gfit["B1"],
         }
         if guess_map['S21']<self.dispmin:
             guess_map['S21'] = dict_1Gfit['S1']
@@ -626,11 +624,11 @@ class Plotfit:
         # Ensure S21 <= S22 at start
         if guess_map["S21"] > guess_map["S22"]:
             guess_map["S21"] = 0.5 * (dict_1Gfit["S1"] + self.dispmin)
-
+            
         names_param = np.array([k for k, status in self.dict_params.items() if status == "free"])
         guess = np.array([guess_map[p] for p in names_param], dtype=float)
         return guess, names_param
-        
+    
     def makefit_2G(self, maxiter: int = 100_000) -> None:
 
         def enforce_narrow_first(trial, gmodel, margin_frac=1e-9):
@@ -797,8 +795,13 @@ class Plotfit:
         #     moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
         # )
         # self.sampler = sampler
-
+        
         guess, names_param = self.make_guess()
+        iS21,iS22 = _idx(names_param,'S21'),_idx(names_param,'S22')
+        if guess[iS21]<dict_bound['S21'][0]: 
+            guess[iS21] = np.mean(dict_bound['S21'])
+            guess[iS22] = np.mean(dict_bound['S22'])+1
+        
         gmodel = Gmodel(self.x, self.y, self.e_y, names_param, dict_bound, self.df)
 
         self.guess_2gfit = guess
@@ -809,15 +812,22 @@ class Plotfit:
         ndim = len(guess)
         nwalkers = 4 * ndim
         
+        lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
+        ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+        
         if self.unconstrained:
-            guess = relabel_by_width(map_params_unconstrained(guess, gmodel),gmodel.names_param)
-            
-            pos = guess + 0.1*np.random.randn(nwalkers,ndim)
             log_prob_2G = gmodel.log_prob_2G_unconstrained
+            gmodel.log_prob = log_prob_2G
+            
+            guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
+            res   = minimize(gmodel.log_prob_guess, x0=guess, method='Nelder-Mead')
+            guess = demap_params2G_unconstrained(res.x, gmodel)
+            guess = np.clip(guess, lb, ub)
+            guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
+            
+            pos = guess + np.random.randn(nwalkers,ndim)
         else:
             # Clip initial walkers to bounds
-            lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
-            ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
             pos = np.clip(np.array(guess) + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
             log_prob_2G = gmodel.log_prob_2G
             
@@ -828,37 +838,46 @@ class Plotfit:
             # NEW: initialize from prior
             pos = sample_initial_from_prior(gmodel, nwalkers, guess=guess)
         
+        # pos = orthogonalize_rows(pos, magnitude=1e-1)
+        
         gmodel.log_prob = log_prob_2G
 
         sampler = emcee.EnsembleSampler(
             nwalkers,
             ndim,
             gmodel.log_prob,
-            # moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
+            moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
         )
         self.sampler = sampler        
 
         self._reset_autocorr_buffers(self.maxiter)
         
-        for state in sampler.sample(pos, iterations=self.maxiter):
-            # bad = ~np.isfinite(state.log_prob)
-            # if np.any(bad):
-            #     bad_coords = state.coords[bad]
-            #     # Map & print the bad walkers
-            #     pos_mapped = bad_coords.copy()
-            #     if self.unconstrained:
-            #         pos_mapped[:, iA21] = _softplus(pos_mapped[:, iA21])
-            #         pos_mapped[:, iA22] = _softplus(pos_mapped[:, iA22])
-            #         pos_mapped[:, iS21] = _softplus(pos_mapped[:, iS21])
-            #         pos_mapped[:, iS22] = _softplus(pos_mapped[:, iS22]) + pos_mapped[:, iS21]
-            #     for p_map, p_raw in zip(pos_mapped, bad_coords):
-            #         print(gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
-            #     break  # stop immediately so you can debug
-            
-            if sampler.iteration % self.testlength:
-                continue
-            if self.check_converged(sampler, gmodel, generate_plot=True):#self.plot_autocorr):
-                break
+        try:
+            for state in sampler.sample(pos, iterations=self.maxiter):
+                # bad = ~np.isfinite(state.log_prob)
+                # if np.any(bad):
+                #     bad_coords = state.coords[bad]
+                #     # Map & print the bad walkers
+                #     pos_mapped = bad_coords.copy()
+                #     if self.unconstrained:
+                #         pos_mapped[:, iA21] = _softplus(pos_mapped[:, iA21])
+                #         pos_mapped[:, iA22] = _softplus(pos_mapped[:, iA22])
+                #         pos_mapped[:, iS21] = _softplus(pos_mapped[:, iS21])
+                #         pos_mapped[:, iS22] = _softplus(pos_mapped[:, iS22]) + pos_mapped[:, iS21]
+                #     for p_map, p_raw in zip(pos_mapped, bad_coords):
+                #         print(gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
+                #     break  # stop immediately so you can debug
+                
+                if sampler.iteration % self.testlength:
+                    continue
+                if self.check_converged(sampler, gmodel, generate_plot=self.plot_autocorr):
+                    break
+        except ValueError:
+            print(gmodel.dict_bound['S21'])
+            print(guess)
+            pprint(pos)
+            print(self.name_cube)
+            raise
 
         
         # for _ in sampler.sample(pos, iterations=self.maxiter):
@@ -923,9 +942,8 @@ class Plotfit:
 
         guess_1G = self.df.loc[0, ["A1", "V1", "S1", "B1"]].to_numpy(dtype=float)
         if self.unconstrained:
-            guess_1G[0] = _inv_softplus(guess_1G[0])
-            guess_1G[2] = _inv_softplus(guess_1G[2])
-            guess = relabel_by_width(map_params_unconstrained(guess,self.gmodel),self.gmodel.names_param)
+            guess_1G = map_params1G_unconstrained(guess_1G, self.gmodel_1G)
+            guess = relabel_by_width(map_params2G_unconstrained(guess,self.gmodel),self.gmodel.names_param)
         pbar = tqdm(total=nsample) if pbar_resample else None
         timei = time.time()
 
@@ -941,9 +959,9 @@ class Plotfit:
                 res_1G = self.makefit_1G_minimize(self.x, y_w_noise, self.e_y, guess=guess_1G)
                 A1, V1, S1, B1 = (res_1G[k] for k in ["A1", "V1", "S1", "B1"])
                 
-                if self.unconstrained:
-                    A1 = _softplus(A1)
-                    S1 = _softplus(S1)
+                # if self.unconstrained:
+                #     A1 = _softplus(A1)
+                #     S1 = _softplus(S1)
 
                 # Update bounds that depend on data scale
                 # gmodel.update_bound("S21", np.array([self.dispmin,S1], dtype=np.float64))
@@ -970,7 +988,7 @@ class Plotfit:
             pbar.close()
             
         if self.unconstrained:
-            resampled = relabel_by_width(demap_params_unconstrained(resampled,self.gmodel),self.gmodel.names_param)
+            resampled = relabel_by_width(demap_params2G_unconstrained(resampled,self.gmodel),self.gmodel.names_param)
         self.resampled = resampled
 
         # Fill resampled summary
