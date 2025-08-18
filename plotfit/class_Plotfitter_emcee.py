@@ -421,7 +421,7 @@ class Plotfit:
 
         dict_bound = {
             "A1": np.array([0, 1.5]) * self.ymax,
-            "V1": np.array([self.xmin,self.xmax]),
+            "V1": np.array([-10,10])*self.chansep,
             "S1": np.array([self.dispmin, self.dispmax]),
             "B1": np.array([-1.0, 1.0]) * self.ymax,
         }
@@ -436,7 +436,7 @@ class Plotfit:
         else:
             gmodel.log_prob = gmodel.log_prob_1G
 
-        res = minimize(gmodel.log_prob_guess, guess, method="Nelder-Mead")
+        res = minimize(gmodel.log_prob_guess, guess, method="L-BFGS-B")
         
         resx = res.x
         if self.unconstrained:
@@ -532,11 +532,20 @@ class Plotfit:
         nwalkers = max(4, int(len(guess_vec) * 2))
         ndim = len(guess_vec)
         
+        iS1 = _idx(gmodel.names_param,'S1')
+        if guess_vec[iS1]<2*gmodel.dict_bound['S1'][0]:
+            guess_vec[iS1]=2*gmodel.dict_bound['S1'][0]
+        
         lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
         ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+        w  = ub - lb
+
+        # clip to the inner 10–90% of each bound
+        lb = lb + 0.1 * w
+        ub = ub - 0.1 * w
         
         if self.unconstrained:
-            guess_vec = np.clip(guess_vec, lb,ub)
+            guess_vec = np.clip(guess_vec,lb,ub)
             guess_vec = map_params1G_unconstrained(guess_vec,gmodel)
             pos = guess_vec + np.random.randn(nwalkers,ndim)
             log_prob_1G = gmodel.log_prob_1G_unconstrained
@@ -569,8 +578,11 @@ class Plotfit:
                 if self.unconstrained:
                     pos_mapped = demap_params1G_unconstrained(pos_mapped, gmodel)
                 for p_map, p_raw in zip(pos_mapped, bad_coords):
-                    print(self.name_cube, gmodel.array_to_dict_guess(p_map), gmodel.log_prob(p_raw), flush=True)
-                    self.print_diagnose_params()
+                    print(self.name_cube)
+                    pprint(gmodel.array_to_dict_guess(p_map))
+                    pprint(gmodel.array_to_dict_guess(p_raw))
+                    print(gmodel.log_prob(p_raw))
+                    # self.print_diagnose_params()
                 break  # stop immediately so you can debug
             
             if sampler.iteration % self.testlength:
@@ -814,13 +826,18 @@ class Plotfit:
         
         lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
         ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+        w  = ub - lb
+
+        # clip to the inner 10–90% of each bound
+        lb = lb + 0.1 * w
+        ub = ub - 0.1 * w
         
         if self.unconstrained:
             log_prob_2G = gmodel.log_prob_2G_unconstrained
             gmodel.log_prob = log_prob_2G
             
             guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
-            res   = minimize(gmodel.log_prob_guess, x0=guess, method='Nelder-Mead')
+            res   = minimize(gmodel.log_prob_guess, x0=guess, method='L-BFGS-B')
             guess = demap_params2G_unconstrained(res.x, gmodel)
             guess = np.clip(guess, lb, ub)
             guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
@@ -1006,7 +1023,7 @@ class Plotfit:
         Ats = Ans + Abs
 
         if self.truth_from_resampling:
-            print(f"[Plotfit {self.name_cube}] truth_from_resampling=True; filling df with resampled values")
+            # print(f"[Plotfit {self.name_cube}] truth_from_resampling=True; filling df with resampled values")
             for param in self.gmodel.names_param:  # type: ignore[union-attr]
                 p_idx = int(np.where(self.params_2gfit == param)[0][0])
                 self.df[param] = np.median(sort_outliers(resampled[:, p_idx]))
@@ -1084,7 +1101,7 @@ class Plotfit:
 
     def check_list_disp(self) -> bool:
         # Bounds from spectral resolution & bandwidth
-        self.dispmin = (self.chansep / 2.355) * 3.0
+        self.dispmin = (self.chansep / 2.355) * 2.0
         self.dispmax = self.bandwidth / 2.355
 
         if (self.dispmax - self.dispmin) < 2:
@@ -1104,6 +1121,10 @@ class Plotfit:
             self.df_params["Reliable"] = "W_S1>BW"
             self.GFIT1_success = False
             return
+        
+        if SNR1<15 and self.dict_params['B2']=='free':
+            print(f"[Plotfit] {self.name_cube} Forcing B2=fix; SNR1<15")
+            self.dict_params['B2']='fix'
 
     def evaluate_2GFIT(self) -> None:
         A21, A22, N2, SNR2 = self.df.loc[0, ["A21", "A22", "N2", "SNR2"]]

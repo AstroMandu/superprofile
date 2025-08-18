@@ -135,30 +135,22 @@ class Gmodel:
     
     def log_prob_2G_unconstrained(self, params):
         if not check_sanity(params): return -np.inf
-        A21,A22,S21,S22 = (
-            params[self.iA21],
-            params[self.iA22],
-            params[self.iS21],
-            params[self.iS22],
-        )
+        A21, A22 = params[self.iA21], params[self.iA22]
+        S21, S22 = params[self.iS21], params[self.iS22]
         V21 = params[self.iV21] if self.has_V21 else self.V1
         V22 = params[self.iV22] if self.has_V22 else V21
         B2  = params[self.iB2 ] if self.has_B2  else self.B1
         
         dict_bound = self.dict_bound
-        boundA21 = dict_bound['A21']
-        boundA22 = dict_bound['A22']
-        boundV2X = dict_bound['V21']
-        boundS2X = dict_bound['S21']
-        boundB2  = dict_bound['B2']
+
+        uA21 = _sigmoid_mapped(A21,dict_bound['A21'])
+        uA22 = _sigmoid_mapped(A22,dict_bound['A21'])
+        uS21 = _sigmoid_mapped(S21,dict_bound['S21'])
+        uS22 = _sigmoid_mapped(S22,dict_bound['S21'])
         
-        uA21 = _sigmoid_mapped(A21,boundA21)
-        uA22 = _sigmoid_mapped(A22,boundA22)
-        uV21 = _sigmoid_mapped(V21,boundV2X)
-        uV22 = _sigmoid_mapped(V22,boundV2X)
-        uS21 = _sigmoid_mapped(S21,boundS2X)
-        uS22 = _sigmoid_mapped(S22,boundS2X)
-        uB2  = _sigmoid_mapped(B2, boundB2)
+        uV21 = _sigmoid_mapped(V21,dict_bound['V21']) if self.has_V21 else self.V1
+        uV22 = _sigmoid_mapped(V22,dict_bound['V22']) if self.has_V22 else uV21
+        uB2  = _sigmoid_mapped(B2, dict_bound['B2'])  if self.has_B2  else self.B1
         
         logl = self.log_L_2G(uA21,uA22,uV21,uV22,uS21,uS22,uB2)
         return logl if isfinite(logl) else -np.inf
