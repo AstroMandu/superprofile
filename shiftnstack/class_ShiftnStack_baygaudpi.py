@@ -290,7 +290,7 @@ class ShiftnStack:
                 data_mom2 = fits.getdata(self.path_cube.parent/'cube_mom2.fits')/1000.
             else: data_mom2 = None
             
-            data_vf_secondary = np.where(data_mom2<self.chansep/2.355*3, np.nan, data_vf_secondary)
+            data_vf_secondary = np.where(data_mom2<self.chansep/2.355*2, np.nan, data_vf_secondary)
             
             for y,x in np.argwhere((np.isfinite(data_mask)) & (np.isfinite(data_vf_secondary))):
                 shift = data_vf_secondary[y,x]/self.chansep
@@ -353,7 +353,7 @@ class ShiftnStack:
         df['e_y'] = e_y.value
         df['N']   = NN
         
-        # df = df.loc[df['N']>0].reset_index(drop=True)
+        df = df.loc[df['N']>28.59].reset_index(drop=True)
 
         self.xx  = df['x']
         self.yy  = df['y']

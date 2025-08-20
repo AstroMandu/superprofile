@@ -7,10 +7,11 @@ from chainconsumer import Chain, ChainConsumer, Truth
 from matplotlib.patches import Rectangle
 from PIL import Image, ImageFile
 
-from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area, _idx, _softplus, _inv_softplus, _sigmoid_mapped, demap_params2G_unconstrained
+from.subroutines_Plotfitter import gauss, sort_outliers, gaussian_area, _idx, _softplus, _inv_softplus, _sigmoid_mapped, demap_params_unconstrained, relabel_by_width
 import pandas as pd
 import pylab as plt
 import time
+import io
 
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
@@ -57,7 +58,7 @@ class Plotter:
         
         flat_samples = self.sampler.get_chain(discard=self.burnin, flat=True, thin=self.thin)
         if self.unconstrained:
-            flat_samples = demap_params2G_unconstrained(flat_samples, self.gmodel)
+            flat_samples = relabel_by_width(demap_params_unconstrained(flat_samples, self.gmodel),self.gmodel.names_param)
         df = pd.DataFrame()
         for i, label in enumerate(self.names_param):
             df[label] = flat_samples[:,i]
@@ -90,7 +91,6 @@ class Plotter:
     def makeplot_corner_resample(self, savefig:bool=True) -> plt.Figure:
         
         if ~np.isfinite(self.df_params['e_sn'].item()): return
-        
         df = pd.DataFrame()
         
         for i, label in enumerate(self.names_param):
@@ -103,9 +103,10 @@ class Plotter:
         for param in self.names_param:
             dict_truth[param] = self.df[param].item()
         consumer.add_truth(Truth(location=dict_truth, name='emcee', color='tab:blue'))
+        dict_truth = {}
         for i, param in enumerate(self.names_param):
             dict_truth[param] = np.nanmedian(sort_outliers(self.resampled[:,i]))
-        consumer.add_truth(Truth(location=dict_truth, name='resampled', color='tab:orange'))
+        consumer.add_truth(Truth(location=dict_truth, name='resampled', color='tab:orange',line_style=':'))
         
         try:
             fig = consumer.plotter.plot()
@@ -418,8 +419,13 @@ class Plotter:
 
         fig = plt.figure(figsize=(25,15))
         fig.subplots_adjust(left=0,right=1,bottom=0,top=1)
-        fig.savefig(self.savename_atlas)
-        background = Image.open(self.savename_atlas)
+        
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+        buf.seek(0)
+        background = Image.open(buf)
+        
         bgwidth, bgheight = background.size
         
         # ax_guide = fig.add_subplot([0,0,1,1])
@@ -483,8 +489,6 @@ class Plotter:
         
         self.makeplot_2GFIT(ax_2GFIT, ax_2Gres)
         
-        
-        
         #===============
         coord_disphist = {
             'l':0.07,
@@ -500,9 +504,6 @@ class Plotter:
         self.makeplot_disphist(ax)
 
         #===============
-        
-        background = Image.open(self.savename_atlas)
-        bgwidth, bgheight = background.size
         
         coord_corner_emcee = {
                 'l':0.26*bgwidth,
@@ -536,11 +537,14 @@ class Plotter:
             ax_GFIT_resamp = fig.add_subplot(dict_coord_to_subplot_coord(coord_GFIT_resample))
             self.makeplot_GFIT_resampled(ax_GFIT_resamp)
         
-        
-        fig.savefig(self.savename_atlas)
-        
             
-        background = Image.open(self.savename_atlas)
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png")
+        plt.close(fig)
+        buf.seek(0)
+        background = Image.open(buf)
+        
+        # background = Image.open(self.savename_atlas)
         bgwidth, bgheight = background.size
         
         if(np.isfinite(self.df['SNR2'].item())):

@@ -18,13 +18,10 @@ def run_makemask(paths_cube, multiplier_radius, col_radius, maskwheres=['I','O']
     df_diam = pd.read_csv(path_df, sep='\s+')
    
     for maskwhere in maskwheres:
-        pbar = tqdm(paths_cube)
-        for path_cube in pbar:
+        for path_cube in paths_cube:
             
             path_cube = Path(path_cube)
             galname = path_cube.parent.name
-            
-            pbar.set_description('{} {} {}'.format(galname, maskwhere, multiplier_radius))
             
             if(path_cube.parent.parent.parent.name=='Rory'):
                 print('[Makemask_ellipse] Using pre-defined config')
@@ -48,8 +45,9 @@ def run_makemask(paths_cube, multiplier_radius, col_radius, maskwheres=['I','O']
                     df_diam['RHI_arcsec'] = (df_diam['RHI(kpc)']/1000) / df_diam['D'] * 180/np.pi * 3600
                     radius = df_diam.loc[loc,'RHI_arcsec'] * u.arcsec * multiplier_radius
                     radtag = 'RHI'
+                
                     
-                    if np.isfinite(df_diam.loc[loc,'r25'])==False: radius = np.nan
+                    # if np.isfinite(df_diam.loc[loc,'r25'])==False: radius = np.nan
             
             data_mask = makemask(path_cube, 
                                 ra,dec,

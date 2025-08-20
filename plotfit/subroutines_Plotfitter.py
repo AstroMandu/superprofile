@@ -132,6 +132,10 @@ def bound_to_div(bound):
     return 1/(bound[1]-bound[0])
 
 @njit(fastmath=True, cache=True)
+def bound_to_span(bound):
+    return bound[1]-bound[0]
+
+@njit(fastmath=True, cache=True)
 def log_L_1G_jit(x, y, inv_e_y, A1, V1, S1, B1):
     model = gauss(x, A1, V1, S1) + B1
     return chisq_gauss2(y, model, inv_e_y)
@@ -156,14 +160,12 @@ def _sigmoid01_tanh(z):
 
 # mapped sigmoid: (−∞,∞) → (lo, hi)
 @njit(fastmath=True, cache=True)
-def _sigmoid_mapped(raw, bound):
-    lo = float(bound[0]); hi = float(bound[1])
-    return lo + (hi - lo) * _sigmoid01_tanh(raw)
+def _sigmoid_mapped(raw, low, span):
+    # lo = float(bound[0]); hi = float(bound[1])
+    return low + span * _sigmoid01_tanh(raw)
 
-def _inv_sigmoid_mapped(scaled, bound, eps=1e-12):
-    lo = float(bound[0]); hi = float(bound[1])
-    span = hi - lo
-    x = (scaled - lo) / span                 # (0,1)
+def _inv_sigmoid_mapped(scaled, low, span, eps=1e-12):
+    x = (scaled - low) / span                 # (0,1)
     x = np.clip(x, eps, 1.0 - eps)           # keep away from endpoints
     # tanh inverse: z = 2 * atanh(2x - 1)
     y = 2.0 * x - 1.0                        # (-1,1)
@@ -258,89 +260,32 @@ def relabel_by_width(samples, names):
 
     return work[0] if one_d else work
 
-def demap_params1G_unconstrained(params, gmodel):
-    def demap_A1(A1): return _sigmoid_mapped(A1,gmodel.dict_bound['A1'])
-    def demap_V1(V1): return _sigmoid_mapped(V1,gmodel.dict_bound['V1'])
-    def demap_S1(S1): return _sigmoid_mapped(S1,gmodel.dict_bound['S1'])
-    def demap_B1(B1): return _sigmoid_mapped(B1,gmodel.dict_bound['B1'])
+def bound_to_lowspan(bound):
+    low, high = bound
+    return low, high-low
+
+def demap_params_unconstrained(params, gmodel):
+    _low  = gmodel._low
+    _spn  = gmodel._spn
+    
     params_demapped = params.copy()
     if len(params.shape)>1:
-        params_demapped[:,gmodel.iA1] = demap_A1(params[:,gmodel.iA1])
-        params_demapped[:,gmodel.iV1] = demap_V1(params[:,gmodel.iV1])
-        params_demapped[:,gmodel.iS1] = demap_S1(params[:,gmodel.iS1])
-        params_demapped[:,gmodel.iB1] = demap_B1(params[:,gmodel.iB1])
+        params_demapped = _sigmoid_mapped(params, _low[None, :], _spn[None, :])
     else:
-        params_demapped[gmodel.iA1] = demap_A1(params[gmodel.iA1])
-        params_demapped[gmodel.iV1] = demap_V1(params[gmodel.iV1])
-        params_demapped[gmodel.iS1] = demap_S1(params[gmodel.iS1])
-        params_demapped[gmodel.iB1] = demap_B1(params[gmodel.iB1])
+        params_demapped = _sigmoid_mapped(params, _low, _spn)
     return params_demapped
 
-def map_params1G_unconstrained(params, gmodel):
-    def map_A1(A1): return _inv_sigmoid_mapped(A1,gmodel.dict_bound['A1'])
-    def map_V1(V1): return _inv_sigmoid_mapped(V1,gmodel.dict_bound['V1'])
-    def map_S1(S1): return _inv_sigmoid_mapped(S1,gmodel.dict_bound['S1'])
-    def map_B1(B1): return _inv_sigmoid_mapped(B1,gmodel.dict_bound['B1'])
+def map_params_unconstrained(params, gmodel):
+    _low  = gmodel._low
+    _spn  = gmodel._spn
+    
     params_mapped = params.copy()
     if len(params.shape)>1:
-        params_mapped[:,gmodel.iA1] = map_A1(params[:,gmodel.iA1])
-        params_mapped[:,gmodel.iV1] = map_V1(params[:,gmodel.iV1])
-        params_mapped[:,gmodel.iS1] = map_S1(params[:,gmodel.iS1])
-        params_mapped[:,gmodel.iB1] = map_B1(params[:,gmodel.iB1])
+        params_mapped = _inv_sigmoid_mapped(params, _low[None, :], _spn[None, :])
     else:
-        params_mapped[gmodel.iA1] = map_A1(params[gmodel.iA1])
-        params_mapped[gmodel.iV1] = map_V1(params[gmodel.iV1])
-        params_mapped[gmodel.iS1] = map_S1(params[gmodel.iS1])
-        params_mapped[gmodel.iB1] = map_B1(params[gmodel.iB1])
+        params_mapped = _inv_sigmoid_mapped(params, _low, _spn)
     return params_mapped
 
-def demap_params2G_unconstrained(params, gmodel):
-    def demap_A2X(A2X): return _sigmoid_mapped(A2X,gmodel.dict_bound['A21'])
-    def demap_V2X(V2X): return _sigmoid_mapped(V2X,gmodel.dict_bound['V21'])
-    def demap_S2X(S2X): return _sigmoid_mapped(S2X,gmodel.dict_bound['S21'])
-    def demap_B2(B2):   return _sigmoid_mapped(B2, gmodel.dict_bound['B2'])
-    params_demapped = params.copy()
-    if len(params.shape)>1:
-        params_demapped[:,gmodel.iA21] = demap_A2X(params[:,gmodel.iA21])
-        params_demapped[:,gmodel.iA22] = demap_A2X(params[:,gmodel.iA22])
-        params_demapped[:,gmodel.iS21] = demap_S2X(params[:,gmodel.iS21])
-        params_demapped[:,gmodel.iS22] = demap_S2X(params[:,gmodel.iS22])
-        if gmodel.has_V21: params_demapped[:,gmodel.iV21] = demap_V2X(params[:,gmodel.iV21])
-        if gmodel.has_V22: params_demapped[:,gmodel.iV22] = demap_V2X(params[:,gmodel.iV22])
-        if gmodel.has_B2:  params_demapped[:,gmodel.iB2]  = demap_B2( params[:,gmodel.iB2])
-    else:
-        params_demapped[gmodel.iA21] = demap_A2X(params[gmodel.iA21])
-        params_demapped[gmodel.iA22] = demap_A2X(params[gmodel.iA22])
-        params_demapped[gmodel.iS21] = demap_S2X(params[gmodel.iS21])
-        params_demapped[gmodel.iS22] = demap_S2X(params[gmodel.iS22])
-        if gmodel.has_V21: params_demapped[gmodel.iV21] = demap_V2X(params[gmodel.iV21])
-        if gmodel.has_V22: params_demapped[gmodel.iV22] = demap_V2X(params[gmodel.iV22])
-        if gmodel.has_B2:  params_demapped[gmodel.iB2]  = demap_B2( params[gmodel.iB2])
-    return params_demapped
-
-def map_params2G_unconstrained(params, gmodel):
-    def map_A2X(A2X): return _inv_sigmoid_mapped(A2X,gmodel.dict_bound['A21'])
-    def map_V2X(V2X): return _inv_sigmoid_mapped(V2X,gmodel.dict_bound['V21'])
-    def map_S2X(S2X): return _inv_sigmoid_mapped(S2X,gmodel.dict_bound['S21'])
-    def map_B2(B2):   return _inv_sigmoid_mapped(B2, gmodel.dict_bound['B2'])
-    params_mapped = params.copy()
-    if len(params.shape)>1:
-        params_mapped[:,gmodel.iA21] = map_A2X(params[:,gmodel.iA21])
-        params_mapped[:,gmodel.iA22] = map_A2X(params[:,gmodel.iA22])
-        params_mapped[:,gmodel.iS21] = map_S2X(params[:,gmodel.iS21])
-        params_mapped[:,gmodel.iS22] = map_S2X(params[:,gmodel.iS22])
-        if gmodel.has_V21: params_mapped[:,gmodel.iV21] = map_V2X(params[:,gmodel.iV21])
-        if gmodel.has_V22: params_mapped[:,gmodel.iV22] = map_V2X(params[:,gmodel.iV22])
-        if gmodel.has_B2:  params_mapped[:,gmodel.iB2]  = map_B2( params[:,gmodel.iB2])
-    else:
-        params_mapped[gmodel.iA21] = map_A2X(params[gmodel.iA21])
-        params_mapped[gmodel.iA22] = map_A2X(params[gmodel.iA22])
-        params_mapped[gmodel.iS21] = map_S2X(params[gmodel.iS21])
-        params_mapped[gmodel.iS22] = map_S2X(params[gmodel.iS22])
-        if gmodel.has_V21: params_mapped[gmodel.iV21] = map_V2X(params[gmodel.iV21])
-        if gmodel.has_V22: params_mapped[gmodel.iV22] = map_V2X(params[gmodel.iV22])
-        if gmodel.has_B2:  params_mapped[gmodel.iB2]  = map_B2( params[gmodel.iB2])
-    return params_mapped
 
 @njit(fastmath=True, cache=True)
 def _clip_raw(u, L=RAW_LIM):

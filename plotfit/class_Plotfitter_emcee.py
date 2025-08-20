@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 from pprint import pprint
 from typing import Iterable, Literal, Tuple
+import copy
 
 import emcee
 import numpy as np
@@ -46,8 +47,7 @@ from .subroutines_Plotfitter import (
     get_mode,
     sort_outliers,
     _softplus, _inv_softplus, _idx,
-    map_params1G_unconstrained, demap_params1G_unconstrained,
-    map_params2G_unconstrained, demap_params2G_unconstrained,
+    map_params_unconstrained, demap_params_unconstrained,
     relabel_by_width,
     orthogonalize_rows
 )
@@ -67,8 +67,6 @@ class Plotfit:
     path_temp : str | Path, optional
     plot_autocorr : bool
         If True, writes intermediate autocorr plots.
-    longest_length : int | None
-        Used only for aligned status messages.
     vdisp_low_intrinsic : float
         Lower intrinsic dispersion scale [same unit as x].
     """
@@ -84,7 +82,6 @@ class Plotfit:
         path_plot: str | Path | None = None,
         path_temp: str | Path | None = None,
         plot_autocorr: bool = False,
-        longest_length: int | None = None,
         vdisp_low_intrinsic: float = 4.0,
     ) -> None:
         # Filter out exact zeros to avoid spikes in likelihood
@@ -92,11 +89,10 @@ class Plotfit:
         self.df_stacked = df_stacked
 
         # Basic arrays
-        self.x = np.asarray(self.df_stacked["x"], dtype=np.float64)
-        self.y = np.asarray(self.df_stacked["y"], dtype=np.float64)
+        self.x   = np.asarray(self.df_stacked["x"], dtype=np.float64)
+        self.y   = np.asarray(self.df_stacked["y"], dtype=np.float64)
         self.e_y = np.asarray(self.df_stacked["e_y"], dtype=np.float64)
 
-        self.longest_length = 0 if longest_length is None else int(longest_length)
         self.name_cube = name_cube or "Name"
 
         # Result containers
@@ -161,6 +157,9 @@ class Plotfit:
         self.bandwidh = None  # set after check_stacked
         
         self.unconstrained = True
+        self.GFIT2_redo = False
+        
+        
 
         # Autocorr tracking arrays
         self._reset_autocorr_buffers(maxiter=self.maxiter_2G)
@@ -216,15 +215,15 @@ class Plotfit:
             return
         try:
             (self.path_temp).mkdir(parents=True, exist_ok=True)
-            with open(self.path_temp / f"stat.{self.name_cube}.txt", "w") as f:
-                f.write(f"{self.name_cube:>{self.longest_length}} {message}")
+            with open(self.path_temp / f"stat.{self.name_cube}{self.suffix}.txt", "w") as f:
+                f.write(f"{self.name_cube} {self.suffix} {message}")
         except Exception:
             pass
 
     def removestat(self) -> None:
         if self.path_temp is None:
             return
-        path_stat = self.path_temp / f"stat.{self.name_cube}.txt"
+        path_stat = self.path_temp / f"stat.{self.name_cube}{self.suffix}.txt"
         if path_stat.exists():
             try:
                 os.remove(path_stat)
@@ -243,7 +242,7 @@ class Plotfit:
             params_dict = gmodel.array_to_dict_guess(params)
             if self.unconstrained:
                 params_mapped = params_dict.copy()
-                params_demapped = relabel_by_width(demap_params2G_unconstrained(params,gmodel),gmodel.names_param)
+                params_demapped = relabel_by_width(demap_params_unconstrained(params,gmodel),gmodel.names_param)
                 
                 params_dict     = gmodel.array_to_dict_guess(params_demapped)
             else:
@@ -432,7 +431,7 @@ class Plotfit:
         gmodel = Gmodel(xx, yy, e_y, names_param, dict_bound)
         if self.unconstrained:
             gmodel.log_prob = gmodel.log_prob_1G_unconstrained
-            guess = map_params1G_unconstrained(guess,gmodel)
+            guess = map_params_unconstrained(guess,gmodel)
         else:
             gmodel.log_prob = gmodel.log_prob_1G
 
@@ -440,7 +439,7 @@ class Plotfit:
         
         resx = res.x
         if self.unconstrained:
-            resx = demap_params1G_unconstrained(resx, gmodel)
+            resx = demap_params_unconstrained(resx, gmodel)
             
         if return_gmodel:
             return gmodel.array_to_dict_guess(resx), gmodel
@@ -471,13 +470,13 @@ class Plotfit:
         flat_samples_mapped = sampler.get_chain(discard=burnin, flat=True, thin=thin)
         log_probs = sampler.get_log_prob(discard=burnin, flat=True, thin=thin)
         max_prob_index = int(np.nanargmax(log_probs))
-        
+            
         if self.unconstrained:
             flat_samples = flat_samples_mapped.copy()
             if 'A1' in names:
-                flat_samples = demap_params1G_unconstrained(flat_samples_mapped, self.gmodel)
+                flat_samples = demap_params_unconstrained(flat_samples_mapped, self.gmodel)
             if 'A21' in names:
-                flat_samples = relabel_by_width(demap_params2G_unconstrained(flat_samples_mapped, self.gmodel),self.gmodel.names_param)
+                flat_samples = relabel_by_width(demap_params_unconstrained(flat_samples_mapped, self.gmodel),self.gmodel.names_param)
         else:
             flat_samples = flat_samples_mapped.copy()
                 
@@ -546,7 +545,7 @@ class Plotfit:
         
         if self.unconstrained:
             guess_vec = np.clip(guess_vec,lb,ub)
-            guess_vec = map_params1G_unconstrained(guess_vec,gmodel)
+            guess_vec = map_params_unconstrained(guess_vec,gmodel)
             pos = guess_vec + np.random.randn(nwalkers,ndim)
             log_prob_1G = gmodel.log_prob_1G_unconstrained
         else:
@@ -576,7 +575,7 @@ class Plotfit:
                 # Map & print the bad walkers
                 pos_mapped = bad_coords.copy()
                 if self.unconstrained:
-                    pos_mapped = demap_params1G_unconstrained(pos_mapped, gmodel)
+                    pos_mapped = demap_params_unconstrained(pos_mapped, gmodel)
                 for p_map, p_raw in zip(pos_mapped, bad_coords):
                     print(self.name_cube)
                     pprint(gmodel.array_to_dict_guess(p_map))
@@ -622,11 +621,11 @@ class Plotfit:
         guess_map = {
             # "A21": dict_1Gfit["A1"] * 0.45,
             # "A22": dict_1Gfit["A1"] * 0.45,
-            "A21": dict_1Gfit["A1"] * 0.7,
-            "A22": dict_1Gfit["A1"] * 0.2,
+            "A21": dict_1Gfit["A1"] * 0.99,
+            "A22": dict_1Gfit["A1"] * 0.01,
             "V21": dict_1Gfit["V1"],
             "V22": dict_1Gfit["V1"],
-            "S21": dict_1Gfit["S1"]*0.8,
+            "S21": dict_1Gfit["S1"]*1,
             "S22": dict_1Gfit["S1"]*1.5,
             "B2":  dict_1Gfit["B1"],
         }
@@ -747,11 +746,27 @@ class Plotfit:
 
             return pos
 
+        def choose_logprob2G(gmodel):
+            fitV21 = self.dict_params['V21']=='free'
+            fitV22 = self.dict_params['V22']=='free'
+            fitB2  = self.dict_params['B2' ]=='free'
+            
+            if fitV21 and fitV22 and not fitB2:
+                return gmodel.log_prob_2G_unconstrained_V21rV22rB2x
+            if fitV21 and fitV22 and fitB2:
+                return gmodel.log_prob_2G_unconstrained_V21rV22rB2r
+            if not fitV21 and not fitV22 and not fitB2:
+                return gmodel.log_prob_2G_unconstrained_V21xV22xB2x
+            if not fitV21 and not fitV22 and fitB2:
+                return gmodel.log_prob_2G_unconstrained_V21xV22xB2r
+
         if not self.GFIT1_success:
             self.df_params["Reliable"] = "N"
             return
 
         self.stat = "2GFIT"
+        if self.GFIT2_redo: 
+            self.stat = 're2GFIT'
         self.maxiter = self.maxiter_2G if maxiter is None else int(maxiter)
         self.slope_tau = self.slope_tau_2G
 
@@ -767,14 +782,13 @@ class Plotfit:
             "V22": np.array([-5 * S1, 5 * S1], dtype=float),
             "S21": np.array([self.dispmin, self.dispmax], dtype=float),
             "S22": np.array([self.dispmin, self.dispmax], dtype=float),
-            # "S21": np.array([self.dispmin, S1], dtype=float),
-            # "S21": np.array([0, S1], dtype=float),
-            # "S22": np.array([S1, self.dispmax], dtype=float),
+            # "S21": np.array([0.2*S1, self.dispmax], dtype=float),
+            # "S22": np.array([0.2*S1, self.dispmax], dtype=float),
             "B2": np.array([B1 - N1, B1 + N1], dtype=float),
         }
 
         if (dict_bound["S21"][1] - dict_bound["S21"][0]) < 0:
-            print(f"[Plotfit] {self.name_cube} 2GFIT no-go; 1GFIT near bound")
+            print(f"{self.header_printmsg} {self.name_cube} 2GFIT no-go; 1GFIT near bound")
             self.df_params["Reliable"] = "nearbound"
             return
 
@@ -792,7 +806,7 @@ class Plotfit:
         #     pprint(dict_bound)
         #     self.print_diagnose_params(gmodel, guess)
         #     self.make_atlas()
-        #     raise ValueError(f"[Plotfit] {self.name_cube}'s initial guess violates priors")
+        #     raise ValueError(f"{self.header_printmsg} {self.name_cube}'s initial guess violates priors")
 
         # nwalkers = max(4, int(len(guess) * 2))
         # ndim = len(guess)
@@ -813,8 +827,12 @@ class Plotfit:
         if guess[iS21]<dict_bound['S21'][0]: 
             guess[iS21] = np.mean(dict_bound['S21'])
             guess[iS22] = np.mean(dict_bound['S22'])+1
-        
+            
         gmodel = Gmodel(self.x, self.y, self.e_y, names_param, dict_bound, self.df)
+        
+        if self.GFIT2_redo:
+            gmodel.update_bound('A21',np.float64([0.5,1.5])*self.ymax)
+            gmodel.update_bound('A22',np.float64([0,0.3])*self.ymax)
 
         self.guess_2gfit = guess
         self.gmodel = gmodel
@@ -833,16 +851,17 @@ class Plotfit:
         ub = ub - 0.1 * w
         
         if self.unconstrained:
-            log_prob_2G = gmodel.log_prob_2G_unconstrained
+            # log_prob_2G = gmodel.log_prob_2G_unconstrained
+            log_prob_2G = choose_logprob2G(gmodel)
             gmodel.log_prob = log_prob_2G
             
-            guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
-            res   = minimize(gmodel.log_prob_guess, x0=guess, method='L-BFGS-B')
-            guess = demap_params2G_unconstrained(res.x, gmodel)
-            guess = np.clip(guess, lb, ub)
-            guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
+            # guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
+            # res   = minimize(gmodel.log_prob_guess, x0=guess, method='L-BFGS-B')
+            # guess = demap_params2G_unconstrained(res.x, gmodel)
+            # guess = np.clip(guess, lb, ub)
+            guess = relabel_by_width(map_params_unconstrained(guess, gmodel),gmodel.names_param)
             
-            pos = guess + np.random.randn(nwalkers,ndim)
+            pos = guess + 0.1*np.random.randn(nwalkers,ndim)
         else:
             # Clip initial walkers to bounds
             pos = np.clip(np.array(guess) + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
@@ -959,8 +978,11 @@ class Plotfit:
 
         guess_1G = self.df.loc[0, ["A1", "V1", "S1", "B1"]].to_numpy(dtype=float)
         if self.unconstrained:
-            guess_1G = map_params1G_unconstrained(guess_1G, self.gmodel_1G)
-            guess = relabel_by_width(map_params2G_unconstrained(guess,self.gmodel),self.gmodel.names_param)
+            guess_1G = map_params_unconstrained(guess_1G, self.gmodel_1G)
+            guess = relabel_by_width(map_params_unconstrained(guess,self.gmodel),self.gmodel.names_param)
+            
+        gmodel_resample = copy.deepcopy(self.gmodel)
+            
         pbar = tqdm(total=nsample) if pbar_resample else None
         timei = time.time()
 
@@ -970,7 +992,7 @@ class Plotfit:
                 y_w_noise = self.y + np.random.choice(self.residual_2GFIT, len(self.y), replace=True)
                 ymax = float(np.nanmax(y_w_noise))
 
-                gmodel = self.gmodel  # type: ignore[assignment]
+                gmodel = copy.deepcopy(gmodel_resample)  # type: ignore[assignment]
                 gmodel.y = y_w_noise
 
                 res_1G = self.makefit_1G_minimize(self.x, y_w_noise, self.e_y, guess=guess_1G)
@@ -1005,7 +1027,7 @@ class Plotfit:
             pbar.close()
             
         if self.unconstrained:
-            resampled = relabel_by_width(demap_params2G_unconstrained(resampled,self.gmodel),self.gmodel.names_param)
+            resampled = relabel_by_width(demap_params_unconstrained(resampled,self.gmodel),self.gmodel.names_param)
         self.resampled = resampled
 
         # Fill resampled summary
@@ -1024,9 +1046,9 @@ class Plotfit:
 
         if self.truth_from_resampling:
             # print(f"[Plotfit {self.name_cube}] truth_from_resampling=True; filling df with resampled values")
-            for param in self.gmodel.names_param:  # type: ignore[union-attr]
-                p_idx = int(np.where(self.params_2gfit == param)[0][0])
-                self.df[param] = np.median(sort_outliers(resampled[:, p_idx]))
+            for i,param in enumerate(self.gmodel.names_param):  # type: ignore[union-attr]
+                # self.df[param] = np.median(sort_outliers(resampled[:, i]))
+                self.df[param] = np.median(resampled[:, i])
 
         # Update df_params with central values
         A21, A22, S21, S22 = (self.df.loc[0, k] for k in ["A21", "A22", "S21", "S22"])
@@ -1073,23 +1095,23 @@ class Plotfit:
             self.dict_params["V21"] = "0"
 
         if self.dict_params["V21"] not in ["0", "free", "fix"]:
-            raise TypeError('[Plotfit] V21 must be one of {"0","free","fix"}.')
+            raise TypeError(f'{self.header_printmsg} V21 must be one of {"0","free","fix"}.')
         if self.dict_params["V22"] not in ["0", "free", "fix"]:
-            raise TypeError('[Plotfit] V22 must be one of {"0","free","fix"}.')
+            raise TypeError(f'{self.header_printmsg} V22 must be one of {"0","free","fix"}.')
         if self.dict_params["B2"] not in ["free", "fix"]:
-            raise TypeError('[Plotfit] B2 must be one of {"free","fix"}.')
+            raise TypeError(f'{self.header_printmsg} B2 must be one of {"free","fix"}.')
 
         if self.dict_params["V21"] == "0" and self.dict_params["V22"] == "free":
-            print("[Plotfit] Setting V22=fix; V22 free not possible when V21==0")
+            print(f"{self.header_printmsg} Setting V22=fix; V22 free not possible when V21==0")
             self.dict_params["V22"] = "fix"
         if self.dict_params["V21"] == "fix" and self.dict_params["V22"] == "free":
-            print("[Plotfit] Setting V22=fix; V22 free not possible when V21==fix")
+            print(f"{self.header_printmsg} Setting V22=fix; V22 free not possible when V21==fix")
             self.dict_params["V22"] = "fix"
 
     def check_stacked(self) -> bool:
         if np.all(self.y == 0) or np.all(~np.isfinite(self.y)):
             self.df_params["Reliable"] = "0stacked"
-            print(f"[Plotfit] {self.name_cube:>{self.longest_length}} pass; Nothing seems to be stacked.")
+            print(f"{self.header_printmsg} {self.name_cube} pass; Nothing seems to be stacked.")
             return False
 
         self.xmin, self.xmax = map(float, np.nanpercentile(self.x, [0, 100]))
@@ -1101,12 +1123,12 @@ class Plotfit:
 
     def check_list_disp(self) -> bool:
         # Bounds from spectral resolution & bandwidth
-        self.dispmin = (self.chansep / 2.355) * 2.0
+        self.dispmin = 0 # (self.chansep / 2.355) #* 3.0
         self.dispmax = self.bandwidth / 2.355
 
         if (self.dispmax - self.dispmin) < 2:
             self.df_params["Reliable"] = "disprng"
-            print(f"[Plotfit] {self.name_cube:>{self.longest_length}} pass; Range of stacked dispersion is narrow")
+            print(f"{self.header_printmsg} {self.name_cube} pass; Range of stacked dispersion is narrow")
             return False
         return True
 
@@ -1115,18 +1137,38 @@ class Plotfit:
     # -----------------------------
     def evaluate_1GFIT(self) -> None:
         A1, V1, S1, B1, SNR1 = self.df.loc[0, ["A1", "V1", "S1", "B1", "SNR1"]]
-        # Guard: bandwidth must cover ~FWHM*3
+
+        if SNR1<5:
+            print(f"{self.header_printmsg} {self.name_cube} 2GFIT no-go; SNR1<5")
+            self.df_params["Reliable"] = "lowSNR1"
+            self.GFIT1_success = False
+            return
+        
         if S1 * 2.3 * 2 > self.bandwidth:
-            print(f"[Plotfit] {self.name_cube} 2GFIT no-go; Bandwidth too narrow")
+            print(f"{self.header_printmsg} {self.name_cube} 2GFIT no-go; Bandwidth too narrow")
             self.df_params["Reliable"] = "W_S1>BW"
             self.GFIT1_success = False
             return
         
-        if SNR1<15 and self.dict_params['B2']=='free':
-            print(f"[Plotfit] {self.name_cube} Forcing B2=fix; SNR1<15")
+        if SNR1<20 and self.dict_params['B2']=='free':
+            print(f"{self.header_printmsg} {self.name_cube} Forcing B2=fix; SNR1<20")
             self.dict_params['B2']='fix'
-
+            
     def evaluate_2GFIT(self) -> None:
+        A21, A22, N2, SNR2 = self.df.loc[0, ["A21", "A22", "N2", "SNR2"]]
+
+        if float(A21) < 3 * float(N2):
+            # self.df_params["Reliable"] = "lowA21"
+            self.GFIT2_redo = True
+            return
+            
+        # if float(A22) < 3 * float(N2):
+        #     self.df_params["Reliable"] = "lowA22"
+        #     self.GFIT2_success = False
+        self.GFIT2_redo = False
+            
+
+    def evaluate_final(self) -> None:
         A21, A22, N2, SNR2 = self.df.loc[0, ["A21", "A22", "N2", "SNR2"]]
         if float(SNR2) < 15:
             self.df_params["Reliable"] = "lowSNR2"
@@ -1194,6 +1236,8 @@ class Plotfit:
     def run(self, suffix: str = "", nsample_resample: int = 1499, pbar_resample: bool = False) -> None:
         self.suffix = suffix
         self.nsample_resample = int(nsample_resample)
+        
+        self.header_printmsg = f'[Plotfit {self.suffix}]'
 
         self.check_config()
         if not self.check_stacked():
@@ -1201,7 +1245,7 @@ class Plotfit:
         if not self.check_list_disp():
             return
 
-        self.limit_range(multiplier_disp=15)
+        # self.limit_range(multiplier_disp=50)
         self.makefit_1G(self.x, self.y, self.e_y)
         self.evaluate_1GFIT()
         self.make_atlas()
@@ -1209,8 +1253,12 @@ class Plotfit:
         if self.GFIT1_success:
             self.makefit_2G()
             self.make_atlas()
-            self.resample(nsample=nsample_resample, pbar_resample=pbar_resample)
             self.evaluate_2GFIT()
+            # if self.GFIT2_redo:
+            #     self.makefit_2G()
+            #     self.make_atlas()
+            self.resample(nsample=nsample_resample, pbar_resample=pbar_resample)
+            self.evaluate_final()
             self.make_atlas()
 
         self.removestat()

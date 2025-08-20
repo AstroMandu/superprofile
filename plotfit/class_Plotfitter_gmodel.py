@@ -1,5 +1,5 @@
 import numpy as np
-from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw, _idx,check_sanity, check_sanity_softplus
+from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw, _idx,check_sanity, check_sanity_softplus, bound_to_span
 from math import isfinite
 from pprint import pprint
 
@@ -22,13 +22,14 @@ class Gmodel:
 
         self.delta_disp = 0.
         
-        self._low  = np.array([dict_bound[k][0]            for k in names_param])
-        self._div  = np.array([bound_to_div(dict_bound[k]) for k in names_param])
+        self._low  = np.float64([dict_bound[k][0]             for k in names_param])
+        self._div  = np.float64([bound_to_div(dict_bound[k])  for k in names_param])
+        self._spn  = np.float64([bound_to_span(dict_bound[k]) for k in names_param])
 
         if df_plotfit is not None:
-            self.S1 = np.float64(df_plotfit.loc[0, 'S1'])
-            self.B1 = np.float64(df_plotfit.loc[0, 'B1'])
-            self.V1 = np.float64(df_plotfit.loc[0, 'V1'])
+            self.S1  = np.float64(df_plotfit.loc[0, 'S1'])
+            self.B1  = np.float64(df_plotfit.loc[0, 'B1'])
+            self.V1  = np.float64(df_plotfit.loc[0, 'V1'])
             
         if np.isin('A1',names_param):
             self.iA1 = _idx(names_param,'A1')
@@ -71,9 +72,11 @@ class Gmodel:
     #     return arr
     
     def update_bound(self, name_param, bound):
+        bound = np.float64(bound)
         argwhere = np.argwhere(self.names_param==name_param).item()
         self._low[argwhere] = bound[0]
-        self._div[argwhere] = 1.0 / (bound[1] - bound[0])
+        self._div[argwhere] = bound_to_div(bound)
+        self._spn[argwhere] = bound_to_span(bound)
         self.dict_bound[name_param] = bound
     
     # def map_params(self, params):
@@ -111,14 +114,12 @@ class Gmodel:
         A1,S1,B1 = params[self.iA1], params[self.iS1], params[self.iB1]
         if self.has_V1: V1=params[self.iV1] 
         else: V1=self.V1
-        dict_bound = self.dict_bound
-        uA1 = _sigmoid_mapped(A1,dict_bound['A1'])
-        uV1 = _sigmoid_mapped(V1,dict_bound['V1'])
-        uS1 = _sigmoid_mapped(S1,dict_bound['S1'])
-        uB1 = _sigmoid_mapped(B1,dict_bound['B1'])
+        
+        mapped = _sigmoid_mapped(params, self._low, self._spn)
+        uA1,uV1,uS1,uB1 = _sigmoid_mapped(params, self._low, self._spn)
         logl = self.log_L_1G(uA1,uV1,uS1,uB1)
         return logl if isfinite(logl) else -np.inf
-    
+
     def log_prob_2G(self, params):
         A21,A22,S21,S22 = params[self.iA21],params[self.iA22],params[self.iS21],params[self.iS22]
         if self.has_V21: V21=params[self.iV21] 
@@ -133,25 +134,57 @@ class Gmodel:
         if self.test_2G_ampl(A21,A22,B2)==False:    return -np.inf
         return self.log_L_2G(A21,A22,V21,V22,S21,S22,B2)
     
-    def log_prob_2G_unconstrained(self, params):
-        if not check_sanity(params): return -np.inf
-        A21, A22 = params[self.iA21], params[self.iA22]
-        S21, S22 = params[self.iS21], params[self.iS22]
-        V21 = params[self.iV21] if self.has_V21 else self.V1
-        V22 = params[self.iV22] if self.has_V22 else V21
-        B2  = params[self.iB2 ] if self.has_B2  else self.B1
+    # def log_prob_2G_unconstrained(self, params):
+    #     if not check_sanity(params): return -np.inf
+    #     A21, A22 = params[self.iA21], params[self.iA22]
+    #     S21, S22 = params[self.iS21], params[self.iS22]
+    #     V21 = params[self.iV21] if self.has_V21 else self.V1
+    #     V22 = params[self.iV22] if self.has_V22 else V21
+    #     B2  = params[self.iB2 ] if self.has_B2  else self.B1
         
-        dict_bound = self.dict_bound
+    #     dict_bound = self.dict_bound
 
-        uA21 = _sigmoid_mapped(A21,dict_bound['A21'])
-        uA22 = _sigmoid_mapped(A22,dict_bound['A21'])
-        uS21 = _sigmoid_mapped(S21,dict_bound['S21'])
-        uS22 = _sigmoid_mapped(S22,dict_bound['S21'])
+    #     uA21 = _sigmoid_mapped(A21,dict_bound['A21'])
+    #     uA22 = _sigmoid_mapped(A22,dict_bound['A21'])
+    #     uS21 = _sigmoid_mapped(S21,dict_bound['S21'])
+    #     uS22 = _sigmoid_mapped(S22,dict_bound['S21'])
         
-        uV21 = _sigmoid_mapped(V21,dict_bound['V21']) if self.has_V21 else self.V1
-        uV22 = _sigmoid_mapped(V22,dict_bound['V22']) if self.has_V22 else uV21
-        uB2  = _sigmoid_mapped(B2, dict_bound['B2'])  if self.has_B2  else self.B1
+    #     uV21 = _sigmoid_mapped(V21,dict_bound['V21']) if self.has_V21 else self.V1
+    #     uV22 = _sigmoid_mapped(V22,dict_bound['V22']) if self.has_V22 else uV21
+    #     uB2  = _sigmoid_mapped(B2, dict_bound['B2'])  if self.has_B2  else self.B1
         
+    #     logl = self.log_L_2G(uA21,uA22,uV21,uV22,uS21,uS22,uB2)
+    #     return logl if isfinite(logl) else -np.inf
+    
+    def log_prob_2G_unconstrained_V21xV22xB2x(self, params):
+        if params[2]>params[3]: return -np.inf
+        if not check_sanity(params): return -np.inf
+        uV21,uB2 = self.V1, self.B1
+        uA21,uA22,uS21,uS22 = _sigmoid_mapped(params, self._low, self._spn)
+        logl = self.log_L_2G(uA21,uA22,uV21,uV21,uS21,uS22,uB2)
+        return logl if isfinite(logl) else -np.inf
+    
+    def log_prob_2G_unconstrained_V21xV22xB2r(self, params):
+        if params[2]>params[3]: return -np.inf
+        if not check_sanity(params): return -np.inf
+        uV21 = self.V1
+        uA21,uA22,uS21,uS22,uB2 = _sigmoid_mapped(params, self._low, self._spn)
+        logl = self.log_L_2G(uA21,uA22,uV21,uV21,uS21,uS22,uB2)
+        return logl if isfinite(logl) else -np.inf
+    
+    def log_prob_2G_unconstrained_V21rV22rB2x(self, params):
+        if params[4]>params[5]: return -np.inf
+        if not check_sanity(params): return -np.inf
+        uB2  = self.B1
+        uA21,uA22,uV21,uV22,uS21,uS22 = _sigmoid_mapped(params, self._low, self._spn)
+        logl = self.log_L_2G(uA21,uA22,uV21,uV22,uS21,uS22,uB2)
+        return logl if isfinite(logl) else -np.inf
+    
+    def log_prob_2G_unconstrained_V21rV22rB2r(self, params):
+        if params[4]>params[5]: return -np.inf
+        if not check_sanity(params): return -np.inf
+        uA21,uA22,uV21,uV22,uS21,uS22,uB2 = _sigmoid_mapped(params, self._low, self._spn)
+        if uS21>uS22: return -np.inf
         logl = self.log_L_2G(uA21,uA22,uV21,uV22,uS21,uS22,uB2)
         return logl if isfinite(logl) else -np.inf
 

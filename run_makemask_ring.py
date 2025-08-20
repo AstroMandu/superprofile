@@ -18,7 +18,7 @@ def run_makemask(paths_cube, multiplier_radius_center, width, col_radius,
     df_diam = pd.read_csv(path_df, sep=r'\s+')
     df_diam['RHI_arcsec'] = (df_diam['RHI(kpc)'] / 1000) / df_diam['D'] * (180 / np.pi) * 3600
 
-    for path_cube in tqdm(paths_cube):
+    for path_cube in paths_cube:
         path_cube = Path(path_cube)
         galname = path_cube.parent.name
         if galname == 'VCC1091+98':
@@ -61,7 +61,7 @@ def run_makemask(paths_cube, multiplier_radius_center, width, col_radius,
             raise ValueError(f'Unknown col_radius value: {col_radius}')
 
         # Handle missing radius
-        if not np.isfinite(radius) or not np.isfinite(df_diam.loc[loc, 'r25']):
+        if not np.isfinite(radius):# or not np.isfinite(df_diam.loc[loc, 'r25']):
             radius_inner = radius_outer = np.nan
         else:
             if pm is None:
@@ -83,7 +83,7 @@ def run_makemask(paths_cube, multiplier_radius_center, width, col_radius,
         # Save mask
         maskdir = path_cube.parent / 'mask'
         maskdir.mkdir(exist_ok=True)
-        writename = maskdir / f'mask_R{multiplier_radius_center}{radtag}.fits'
+        writename = maskdir / f'mask_R{multiplier_radius_center:.2f}{radtag}.fits'
         fits.writeto(writename, data_mask, overwrite=True)
 
 
