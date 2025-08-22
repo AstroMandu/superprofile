@@ -215,7 +215,7 @@ def main(n_cores, path_cube, path_velo, path_disp, path_mask=None, vdisp_intrins
 
     spec_axis = SpectralCube.read(path_cube).with_spectral_unit(u.m/u.s, velocity_convention='optical').spectral_axis
     
-    vdisp_channel   = np.abs(np.diff(spec_axis)[0])/2.355 * 3
+    vdisp_channel   = np.abs(np.diff(spec_axis)[0])/2.355 * 2
     vdisp_lower     = np.sqrt((vdisp_intrinsic.to(u.m/u.s))**2 + vdisp_channel**2)
 
     # Generate a temporary directory that will store fit outputs

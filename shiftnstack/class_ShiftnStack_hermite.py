@@ -196,6 +196,9 @@ class ShiftnStack_hermite:
         df['e_y'] = e_y.value
         df['N']   = NN
         
+        pixels_in_beam = self.beam.sr / (self.cd*self.cd).to(u.sr)
+        df = df.loc[df['N']>pixels_in_beam].reset_index(drop=True)
+        
         # df = df.loc[df['N']>0].reset_index(drop=True)
 
         self.xx  = df['x']
@@ -261,6 +264,7 @@ if __name__=='__main__':
             
             
             # print(df.describe())
+        
             
             df.to_string(path_df_out, index=False)
 

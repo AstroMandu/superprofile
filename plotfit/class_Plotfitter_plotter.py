@@ -38,6 +38,8 @@ class Plotter:
         self.savename_paramshist      = path_plot / "Plotfit_params{}_{}.png".format(self.suffix, self.name_cube)
         self.savename_atlas           = path_plot / "Plotfit_atlas{}_{}.png".format(suffix,self.name_cube)
         
+        # self.savename_GFIT            = path_plot / "Plotfit_{{}}GFIT{}_{}.png".format(suffix,self.name_cube)
+        
         self.xs = np.linspace(self.gmodel.x.min(), self.gmodel.x.max(), 1000)
         
         self.x   = self.gmodel.x
@@ -53,12 +55,47 @@ class Plotter:
         self.unconstrained = unconstrained
         
         return
+    
+    def makeplot_GFIT(self, G, savefig:bool=True):
+        
+        fig, axs = plt.subplots(nrows=2, gridspec_kw={'height_ratios': [5,1]})
+        
+        ax = axs[0]
+        
+        ax.axhline(0, color='gray', alpha=0.5)
+        ax.errorbar(self.x, self.y, self.e_y, alpha=0.5, color='gray', fmt='.', elinewidth=0.5)
+        
+        for g in range(1,G+1):
+            if G==1: AA,VV,SS,BB = self.df.loc[0,[f'A{g}',f'V{g}',f'S{g}',f'B{g}']]
+            else:
+                Gg = f'{G}{g}'
+                AA,VV,SS,BB = self.df.loc[0,[f'A{Gg}',f'V{Gg}',f'S{Gg}',f'B{G}']]
+            model = gauss(self.xs,AA,VV,SS)+BB
+            ax.plot(self.xs, model, label=r'$\sigma$={:.1f}'.format(SS))
+        
+        model_totl = np.sum([gauss(self.xs,self.df.loc[0,f'A{G}{g}'],self.df.loc[0,f'V{G}{g}'],self.df.loc[0,f'S{G}{g}']) for g in range(1,G+1)],axis=0)+self.df.loc[0,f'B{G}']
+        ax.plot(self.xs, model_totl, color='black', alpha=0.5, label=r'$\Sigma$')
+        ax.legend()
+        
+        if G==1:
+            residual = self.y - (gauss(self.x,self.df.loc[0,f'A{G}'],self.df.loc[0,f'V{G}'],self.df.loc[0,f'S{G}']) + self.df.loc[0,f'B{G}'])
+        else:
+            residual = self.y - (np.sum([gauss(self.x,self.df.loc[0,f'A{G}{g}'],self.df.loc[0,f'V{G}{g}'],self.df.loc[0,f'S{G}{g}']) for g in range(1,G+1)],axis=0)+self.df.loc[0,f'B{G}'])
+        
+        #plot G2
+        ax = axs[1]
+        ax.axhline(0, color='gray', alpha=0.5)
+        ax.set_xlabel(r'$\mathrm{km \ s^{-1}}$')
+        ax.scatter(self.x, residual, s=3, color='tab:blue')
+        
+        fig.savefig(self.path_plot / "Plotfit_{}GFIT{}_{}.png".format(G,self.suffix,self.name_cube))
+        
 
     def makeplot_corner_emcee(self, savefig:bool=True) -> plt.Figure:
         
         flat_samples = self.sampler.get_chain(discard=self.burnin, flat=True, thin=self.thin)
         if self.unconstrained:
-            flat_samples = relabel_by_width(demap_params_unconstrained(flat_samples, self.gmodel),self.gmodel.names_param)
+            flat_samples = demap_params_unconstrained(flat_samples, self.gmodel)
         df = pd.DataFrame()
         for i, label in enumerate(self.names_param):
             df[label] = flat_samples[:,i]
@@ -71,17 +108,17 @@ class Plotter:
         except:
             return
         
-        iA21 = _idx(self.names_param, 'A21')
-        iA22 = _idx(self.names_param, 'A22')
-        iS21 = _idx(self.names_param, 'S21')
-        iS22 = _idx(self.names_param, 'S22')
+        # iA21 = _idx(self.names_param, 'A21')
+        # iA22 = _idx(self.names_param, 'A22')
+        # iS21 = _idx(self.names_param, 'S21')
+        # iS22 = _idx(self.names_param, 'S22')
         
-        if 'Skew_A21' in self.df:
-            N = len(self.names_param)
-            ax = fig.axes[iA21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A21'].item(),self.df['Kurt_A21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
-            ax = fig.axes[iA22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A22'].item(),self.df['Kurt_A22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
-            ax = fig.axes[iS21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S21'].item(),self.df['Kurt_S21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
-            ax = fig.axes[iS22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S22'].item(),self.df['Kurt_S22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+        # if 'Skew_A21' in self.df:
+        #     N = len(self.names_param)
+        #     ax = fig.axes[iA21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A21'].item(),self.df['Kurt_A21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+        #     ax = fig.axes[iA22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_A22'].item(),self.df['Kurt_A22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+        #     ax = fig.axes[iS21*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S21'].item(),self.df['Kurt_S21'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
+        #     ax = fig.axes[iS22*(N+1)]; ax.text(0.98,0.98, 'Skew={:.1e}\nKurt={:.1e}'.format(self.df['Skew_S22'].item(),self.df['Kurt_S22'].item()), va='top', ha='right', fontsize=10, transform=ax.transAxes)
         
         if savefig:
             fig.savefig(self.savename_corner_emcee, transparent=True)
@@ -143,122 +180,111 @@ class Plotter:
             fig.savefig(self.savename_walks, transparent=transparent)
         
         return fig
-
-    def makeplot_1GFIT(self, ax_1GFIT, ax_1Gres):
+    
+    
+    def makeplot_GFIT_atlas(self, G, ax_GFIT, ax_Gres, config=None):
+                
+        if config=='right':
+            ax_GFIT.xaxis.set_tick_params(labelbottom=False)
+            ax_GFIT.yaxis.set_tick_params(  labelleft=False)
+            ax_Gres.yaxis.set_tick_params(  labelleft=False)
         
-        SNR1, A1, V1, S1, B1 = self.df.loc[0,['SNR1','A1','V1','S1','B1']]
-        residual = self.y - (gauss(self.x,A1,V1,S1)+B1)
-        self.res_1G = residual
-        
-        ax = ax_1GFIT
-        ax.set_title('1G', fontsize=20)
+        ax = ax_GFIT
+        ax.set_title(f'{G}G', fontsize=20)
         ax.xaxis.set_tick_params(labelbottom=False)
-        ax.axhline(0, color='gray', alpha=0.5)
+        
+        ax.axhline(0,color='gray',alpha=0.5)
         ax.errorbar(self.x, self.y, self.e_y, alpha=0.5, color='gray', fmt='.', elinewidth=0.5)
-        ax.plot(self.xs, gauss(self.xs, A1,V1,S1)+B1, color='tab:blue', label=r"$\sigma$={:.1f}".format(S1))
-        ax.legend(title='S/N={:.0f}'.format(SNR1), loc='upper right')
-        ax.set_ylabel(r'$\mathrm{Jy}$')
         
-        ax_1Gres.axhline(0, color='gray', alpha=0.5)
-        ax_1Gres.scatter(self.x, residual, s=3, color='tab:blue')
-        ax_1Gres.set_xlabel(r'$\mathrm{km \ s^{-1}}$')
-        
-        chisq = np.sum((residual/self.e_y)**2)
-        dof   = len(self.y)-4
-        chisq_red = chisq/dof
-        ax_1Gres.text(0.99,0.99, r'$\chi^2_\mathrm{red}$='+f'{chisq_red:.1f}', va='top',ha='right', transform=ax_1Gres.transAxes)
-        
-        noise = np.std(residual)
-        ax_1Gres.text(0.99,0.01, r'RMS='+f'{noise*1000:.2f} mJy', va='bottom',ha='right', transform=ax_1Gres.transAxes)
-        
-        self.chisq_1G = chisq
-        
-    def makeplot_2GFIT(self, ax_2GFIT, ax_2Gres):
-        
-        ax_2GFIT.xaxis.set_tick_params(labelbottom=False)
-        ax_2GFIT.yaxis.set_tick_params(  labelleft=False)
-        ax_2Gres.yaxis.set_tick_params(  labelleft=False)
-        
-        #plot G2
-        ax = ax_2GFIT
-        ax.set_title('2G', fontsize=20)
-        ax.axhline(0, color='gray', alpha=0.5)
-        ax.errorbar(self.x, self.y, self.e_y, alpha=0.5, color='gray', fmt='.', elinewidth=0.5)
-        SNR2 = self.df['SNR2'].item()
-        
-        if self.df_params['Reliable'].item()!='Y':
-            ax.text(0.5,0.5, self.df_params['Reliable'].item(), transform=ax.transAxes,
-                fontsize=10, va='center', ha='center')
-        
-        if np.isfinite(SNR2)==False:
-            pass
-        else:
-            A21,A22,V21,V22,S21,S22,B2,N2 = self.df.loc[0,['A21','A22','V21','V22','S21','S22','B2','N2']]
-            model_narw = gauss(self.xs, A21,V21,S21)+B2
-            model_brod = gauss(self.xs, A22,V22,S22)+B2
-            model_totl = model_narw+model_brod-B2
-            ax.plot(self.xs, model_narw, color='tab:blue'  ,       label=r'$\sigma$={:.1f}'.format(S21))
-            ax.plot(self.xs, model_brod, color='tab:orange',       label=r'$\sigma$={:.1f}'.format(S22))
-            ax.plot(self.xs, model_totl, color='black', alpha=0.5, label=r'$\Sigma$')
-            ax.legend(title='S/N={:.0f}'.format(SNR2), loc='upper right')
-            
-            residual = self.y - (gauss(self.x,A21,V21,S21)+gauss(self.x,A22,V22,S22)+B2)
-            
-            ax_2Gres.axhline(0, color='gray', alpha=0.5)
-            ax_2Gres.yaxis.set_tick_params(  labelleft=False)
-            ax_2Gres.set_xlabel(r'$\mathrm{km \ s^{-1}}$')
-            ax_2Gres.plot(self.x, residual, color='tab:blue')
-            
-            chisq = np.sum((residual/self.e_y)**2)
-            dof   = len(self.y)-len(self.names_param)
-            chisq_red = chisq/dof
-            ax_2Gres.text(0.99,0.99, r'$\chi^2_\mathrm{red}$='+f'{chisq_red:.1f}', va='top',ha='right', transform=ax_2Gres.transAxes)
+        SNRG = self.df.loc[0,f'SNR{G}']
+        if not np.isfinite(SNRG): return
 
-            F, crit = self.df.loc[0,['F-test','F-crit']]        
-            ax_2Gres.text(0.01,0.99, r'F='+f'{F:.2f}({crit:.2f})', va='top',ha='left', transform=ax_2Gres.transAxes)
+        for g in range(1,G+1):
+            if G==1: AA,VV,SS,BB = self.df.loc[0,[f'A{g}',f'V{g}',f'S{g}',f'B{g}']]
+            else:
+                Gg = f'{G}{g}'
+                AA,VV,SS,BB = self.df.loc[0,[f'A{Gg}',f'V{Gg}',f'S{Gg}',f'B{G}']]
+            model = gauss(self.xs,AA,VV,SS)+BB
+            ax.plot(self.xs, model, label=r'$\sigma$={:.1f}'.format(SS))
+        
+        if G==1:
+            model_totl = gauss(self.xs,self.df.loc[0,f'A{G}'],self.df.loc[0,f'V{G}'],self.df.loc[0,f'S{G}']) + self.df.loc[0,f'B{G}']
+        else:
+            model_totl = np.sum([gauss(self.xs,self.df.loc[0,f'A{G}{g}'],self.df.loc[0,f'V{G}{g}'],self.df.loc[0,f'S{G}{g}']) for g in range(1,G+1)],axis=0)+self.df.loc[0,f'B{G}']
+        ax.plot(self.xs, model_totl, color='black', alpha=0.5, label=r'$\Sigma$')
+        ax.legend(title='S/N={:.0f}'.format(SNRG), loc='upper right')
+
+        if G==1:
+            model_totl = gauss(self.x,self.df.loc[0,f'A{G}'],self.df.loc[0,f'V{G}'],self.df.loc[0,f'S{G}']) + self.df.loc[0,f'B{G}']
+        else:
+            model_totl = np.sum([gauss(self.x,self.df.loc[0,f'A{G}{g}'],self.df.loc[0,f'V{G}{g}'],self.df.loc[0,f'S{G}{g}']) for g in range(1,G+1)],axis=0)+self.df.loc[0,f'B{G}']
+        residuals = self.y - model_totl
+    
+        #plot G2
+        ax = ax_Gres
+        ax.axhline(0, color='gray', alpha=0.5)
+        ax.set_xlabel(r'$\mathrm{km \ s^{-1}}$')
+        ax.scatter(self.x, residuals, s=3, color='tab:blue')
             
-            # Noise
-            ax_2GFIT.axhspan(-N2+B2, N2+B2,     color='gray', alpha=0.2, zorder=0)
-            ax_2GFIT.axhspan(-5*N2+B2, 5*N2+B2, color='gray', alpha=0.2, zorder=0)
-            
-            ax_2Gres.text(0.99,0.01, r'RMS='+f'{N2*1000:.2f} mJy', va='bottom',ha='right', transform=ax_2Gres.transAxes)
+        chisq = np.sum((residuals/self.e_y)**2)
+        dof   = len(self.y)-len(self.names_param)
+        chisq_red = chisq/dof
+        ax_Gres.text(0.99,0.99, r'$\chi^2_\mathrm{red}$='+f'{chisq_red:.1f}', va='top',ha='right', transform=ax_Gres.transAxes)
+
+        # F, crit = self.df.loc[0,['F-test','F-crit']]        
+        # ax_2Gres.text(0.01,0.99, r'F='+f'{F:.2f}({crit:.2f})', va='top',ha='left', transform=ax_2Gres.transAxes)
+        
+        NG,BG = self.df.loc[0,[f'N{G}',f'B{G}']]
+        
+        # Noise
+        ax_GFIT.axhspan(  -NG+BG,   NG+BG, color='gray', alpha=0.2, zorder=0)
+        ax_GFIT.axhspan(-3*NG+BG, 3*NG+BG, color='gray', alpha=0.2, zorder=0)
+        
+        ax_Gres.text(0.99,0.01, r'RMS='+f'{NG*1000:.2f} mJy', va='bottom',ha='right', transform=ax_Gres.transAxes)
+
             
     def makeplot_GFIT_resampled(self, ax):
+        
+        if 'A21' in self.names_param: G=2
+        if 'A31' in self.names_param: G=3
+        
+        self.nsample_resample = len(self.resampled[:,0])
+        alpha = np.max([1/self.nsample_resample,1/510.])
+        
         ax.xaxis.set_tick_params(labelbottom=False)
         ax.yaxis.set_tick_params(  labelleft=False)
         
-        #plot G2
         ax.axhline(0, color='gray', alpha=0.5)
         ax.errorbar(self.x, self.y, self.e_y, alpha=0.5, color='gray', fmt='.', elinewidth=0.5)
         
-        argwhere_A21 = np.argwhere(self.names_param=='A21').item()
-        argwhere_A22 = np.argwhere(self.names_param=='A22').item()
-        argwhere_S21 = np.argwhere(self.names_param=='S21').item()
-        argwhere_S22 = np.argwhere(self.names_param=='S22').item()
-        
-        self.nsample_resample = len(self.resampled[:,0])
-        
-        alpha = np.max([1/self.nsample_resample,1/510.])
+        colors = ['tab:blue','tab:orange','tab:green']
         
         for i in range(self.nsample_resample):
             
-            A21 = self.resampled[i,argwhere_A21]
-            A22 = self.resampled[i,argwhere_A22]
-            S21 = self.resampled[i,argwhere_S21]
-            S22 = self.resampled[i,argwhere_S22]
-            if 'V21' not in self.names_param: V21 = self.df['V21'].item()
-            else: V21 = self.resampled[i,np.argwhere(self.names_param=='V21').item()]
-            if 'V22' not in self.names_param: V22 = self.df['V22'].item()
-            else: V22 = self.resampled[i,np.argwhere(self.names_param=='V22').item()]
-            if 'B2' not in self.names_param: B2 = self.df['B2'].item()
-            else: B2 = self.resampled[i,np.argwhere(self.names_param=='B2').item()]
+            if np.isin(f'B{G}',self.names_param):
+                iB = _idx(self.names_param,f'B{G}')
+                BB = self.resampled[i,iB]
+            else:
+                BB = self.df.loc[0,f'B{G}']
+            
+            for g in range(1,G+1):
+                Gg = f'{G}{g}'
+                iA = _idx(self.names_param,f'A{Gg}')
+                iS = _idx(self.names_param,f'S{Gg}')
+                
+                AA = self.resampled[i,iA]
+                SS = self.resampled[i,iS]
+                
+                if np.isin(f'V{Gg}',self.names_param):
+                    iV = _idx(self.names_param,f'V{Gg}')
+                    VV = self.resampled[i,iV]
+                else:
+                    VV = self.df.loc[0,f'V{Gg}']
+                    
+                model = gauss(self.xs, AA,VV,SS)+BB
+                    
+                ax.plot(self.xs, model, alpha=alpha, lw=0.5, zorder=0, color=colors[g-1])
         
-            model_narw = gauss(self.xs, A21,V21,S21)+B2/2
-            model_brod = gauss(self.xs, A22,V22,S22)+B2/2
-            model_totl = model_narw+model_brod
-            ax.plot(self.xs, model_narw, alpha=alpha, lw=0.5, zorder=0, color='tab:blue'  , label=r'$\sigma$={:.1f}'.format(S21))
-            ax.plot(self.xs, model_brod, alpha=alpha, lw=0.5, zorder=2, color='tab:orange', label=r'$\sigma$={:.1f}'.format(S22))
-            ax.plot(self.xs, model_totl, alpha=alpha, lw=0.5, zorder=1, color='gray', label=r'$\Sigma$')
         
     def makeplot_disphist(self, ax:plt.Axes) -> None:
         
@@ -285,34 +311,47 @@ class Plotter:
         for i,val in enumerate(vals_percentile):
             ax.plot([val,val],[ymax*0.5,ymax*0.55], color='black')
             ax.text(val, ymax*0.551, f'{percentiles[i]:.0f}', va='bottom', ha='center')
+            
+        ax.set_xlabel(r'$\mathrm{km \, s^{-1}}$')
         
-        if np.isfinite(self.df.loc[0,'SNR2']):
-            ax.axvspan(self.gmodel.dict_bound['S21'][0],self.gmodel.dict_bound['S22'][1], color='lightgray', alpha=0.5)
-            S21, S22 = self.df.loc[0,['S21','S22']]
-            ax.axvline(S21, color='tab:blue')
-            ax.axvline(S22, color='tab:orange')
-            ax.text(S21,ymax*1.01, r'$\sigma_\mathrm{n}$'+'\n{:.2f}'.format(S21), ha='right', va='bottom')
-            ax.text(S22,ymax*1.01, r'$\sigma_\mathrm{b}$'+'\n{:.2f}'.format(S22), ha='left',  va='bottom')
-            ax.text(ax.get_xlim()[1],ymax*1.01, r'$\sigma_\mathrm{b}-\sigma_\mathrm{n}$'+'\n{:.2f}'.format(S22-S21), ha='right', va='bottom')
+        G = None
+        if np.isin('A21',self.names_param): G=2
+        if np.isin('A31',self.names_param): G=3
+        if G is None: return
+        
+        if not np.isfinite(self.df.loc[0,f'SNR{G}']): return
+
+            # ax.axvspan(self.gmodel.dict_bound['S21'][0],self.gmodel.dict_bound['S22'][1], color='lightgray', alpha=0.5)
+        
+        for g in range(1,G+1):
+            param = f'S{G}{g}'
+            SS = self.df.loc[0,param]
+            ax.axvline(SS)
+            ax.text(SS,ymax*1.01, r'{param}'+'\n{:.2f}'.format(SS), ha='right', va='bottom')
             
-            text  = 'Bounds'
-            text += '\nS21=({:.2f},{:.2f})'.format(self.gmodel.dict_bound['S21'][0],self.gmodel.dict_bound['S21'][1])
-            text += '\nS22=({:.2f},{:.2f})'.format(self.gmodel.dict_bound['S22'][0],self.gmodel.dict_bound['S22'][1])
+        # ax.text(ax.get_xlim()[1],ymax*1.01, r'$\sigma_\mathrm{b}-\sigma_\mathrm{n}$'+'\n{:.2f}'.format(S22-S21), ha='right', va='bottom')
             
-            ax.text(0.99,0.01, text,ha='right',va='bottom', transform=ax.transAxes)
+            # text  = 'Bounds'
+            # text += '\nS21=({:.2f},{:.2f})'.format(self.gmodel.dict_bound['S21'][0],self.gmodel.dict_bound['S21'][1])
+            # text += '\nS22=({:.2f},{:.2f})'.format(self.gmodel.dict_bound['S22'][0],self.gmodel.dict_bound['S22'][1])
+            
+            # ax.text(0.99,0.01, text,ha='right',va='bottom', transform=ax.transAxes)
         # else:
         #     text  = 'Bounds'
         #     text += '\nS1=({:.2f},{:.2f})'.format(self.gmodel.dict_bound['S21'][0],self.gmodel.dict_bound['S21'][1])
         #     ax.text(0.99,0.01, text,ha='right',va='bottom', transform=ax.transAxes)
             
-        ax.set_xlabel(r'$\mathrm{km \, s^{-1}}$')
+        
         
     def makeplot_paramshist(self, key, savefig:bool=True, transparent:bool=True) -> None:
         
-        sn = self.resampled[:,np.argwhere(self.names_param=='S21').item()]
-        sb = self.resampled[:,np.argwhere(self.names_param=='S22').item()]
-        An = gaussian_area(self.resampled[:,np.argwhere(self.names_param=='A21').item()], sn)
-        Ab = gaussian_area(self.resampled[:,np.argwhere(self.names_param=='A22').item()], sb)
+        if 'A31' in self.names_param: G = 3
+        if 'A21' in self.names_param: G = 2
+            
+        sn = self.resampled[:,np.argwhere(self.names_param==f'S{G}1').item()]
+        sb = self.resampled[:,np.argwhere(self.names_param==f'S{G}2').item()]
+        An = gaussian_area(self.resampled[:,np.argwhere(self.names_param==f'A{G}1').item()], sn)
+        Ab = gaussian_area(self.resampled[:,np.argwhere(self.names_param==f'A{G}2').item()], sb)
         At = An+Ab
         
         dict_resampled = {
@@ -386,11 +425,8 @@ class Plotter:
             fig.savefig(self.savename_paramshist, transparent=True)
         
         return fig
-            
         
-        
-        
-    def makeplot_atlas(self) -> None:
+    def makeplot_atlas(self, G=2) -> None:
         
         def dict_coord_to_subplot_coord(dict_coord):
             return [dict_coord['l'],dict_coord['b'],dict_coord['r']-dict_coord['l'],dict_coord['t']-dict_coord['b']]
@@ -476,7 +512,7 @@ class Plotter:
         ax_1GFIT = fig.add_subplot(dict_coord_to_subplot_coord(coord_frame_1GFIT))
         ax_1Gres = fig.add_subplot(dict_coord_to_subplot_coord(coord_frame_1Gres), sharex=ax_1GFIT)
         
-        self.makeplot_1GFIT(ax_1GFIT, ax_1Gres)
+        self.makeplot_GFIT_atlas(1, ax_1GFIT, ax_1Gres)
         
         coord_frame_2GFIT = {'t':coord_frame_1GFIT['t'],
                     'l':coord_frame_1GFIT['r']+0.01,       'r':coord_frame_1GFIT['r']*2-coord_frame_1GFIT['l']+0.01,
@@ -487,7 +523,7 @@ class Plotter:
         ax_2GFIT = fig.add_subplot(dict_coord_to_subplot_coord(coord_frame_2GFIT), sharex=ax_1GFIT, sharey=ax_1GFIT)
         ax_2Gres = fig.add_subplot(dict_coord_to_subplot_coord(coord_frame_2Gres), sharex=ax_1GFIT, sharey=ax_1Gres)
         
-        self.makeplot_2GFIT(ax_2GFIT, ax_2Gres)
+        self.makeplot_GFIT_atlas(G, ax_2GFIT, ax_2Gres, config='right')
         
         #===============
         coord_disphist = {
@@ -547,7 +583,7 @@ class Plotter:
         # background = Image.open(self.savename_atlas)
         bgwidth, bgheight = background.size
         
-        if(np.isfinite(self.df['SNR2'].item())):
+        if(np.isfinite(self.df[f'SNR{G}'].item())):
             self.makeplot_corner_emcee(savefig=True)
             try: paste_image(self.savename_corner_emcee, coord_corner_emcee)
             except AttributeError: pass

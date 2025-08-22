@@ -235,61 +235,22 @@ class Plotfit:
     # -----------------------------
     def print_diagnose_params(self, gmodel: Gmodel, params: np.ndarray) -> None:
         """Print parameter mapping and bound conformity for debugging."""
-        if "A21" in gmodel.names_param:
-            df_diag = pd.DataFrame()
-            df_diag["Index"] = ["orig", "mapd", "fini"]
+        
+        df_diag = pd.DataFrame()
+        df_diag["Index"] = ["mapd", "demapd", "finite"]
+        
+        dict_params_mapped   = gmodel.array_to_dict_guess(params)
+        dict_params_demapped = gmodel.array_to_dict_guess(demap_params_unconstrained(params,gmodel))
+        
+        for label in gmodel.names_param:
+            mapd    =   dict_params_mapped[label]
+            demapd  = dict_params_demapped[label]
+            bound   = gmodel.dict_bound[label]
+            fini    = bound[0]<demapd<bound[1]
+            df_diag[label] = [mapd, demapd, fini]        
+            
+        print(df_diag.to_string())
 
-            params_dict = gmodel.array_to_dict_guess(params)
-            if self.unconstrained:
-                params_mapped = params_dict.copy()
-                params_demapped = relabel_by_width(demap_params_unconstrained(params,gmodel),gmodel.names_param)
-                
-                params_dict     = gmodel.array_to_dict_guess(params_demapped)
-            else:
-                params_mapped = gmodel.array_to_dict_guess(gmodel.map_params(params).flatten())
-
-            df_diag["S1"] = [gmodel.S1, None, None]
-            for label in gmodel.names_param:
-                in_unit = params_dict[label]
-                mapped = params_mapped[label]
-                fini = (0 < mapped < 1)
-                df_diag[label] = [in_unit, mapped, fini]
-            if (df_diag.loc[df_diag["Index"] == "fini"] == False).any(axis=None):
-                pprint(gmodel.dict_bound)
-                print(df_diag.to_string())
-
-            if "B2" in gmodel.names_param:
-                df_ampl = pd.DataFrame({
-                    "cond": ["ampl"],
-                    "fini": [bool(gmodel.test_2G_ampl(params_dict["A21"], params_dict["A22"], params_dict["B2"]))],
-                })
-                if (df_ampl["fini"] == False).any():
-                    print(df_ampl.to_string())
-
-            df_disp = pd.DataFrame({
-                "cond": ["disp1"],
-                "S1": [gmodel.S1],
-                "S21": [params_dict["S21"]],
-                "S22": [params_dict["S22"]],
-                "S22-S21": [params_dict["S22"] - params_dict["S21"]],
-                "delta_disp": [gmodel.delta_disp],
-                "fini": [bool(gmodel.test_2G_disp_order(params_dict["S21"], params_dict["S22"]))],
-            })
-            if (df_disp["fini"] == False).any():
-                print(df_disp.to_string())
-        else:
-            df_diag = pd.DataFrame()
-            df_diag["Index"] = ["orig", "mapd", "fini"]
-            params_dict = gmodel.array_to_dict_guess(params)
-            params_mapped = gmodel.array_to_dict_guess(gmodel.map_params(params).flatten())
-            for label in gmodel.names_param:
-                in_unit = params_dict[label]
-                mapped = params_mapped[label]
-                fini = (0 < mapped < 1)
-                df_diag[label] = [in_unit, mapped, fini]
-            if (df_diag.loc[df_diag["Index"] == "fini"] == False).any(axis=None):
-                pprint(gmodel.dict_bound)
-                print(df_diag.to_string())
 
     def _reset_autocorr_buffers(self, maxiter: int) -> None:
         arrlen = int(maxiter / self.testlength)
@@ -303,7 +264,7 @@ class Plotfit:
     def makeplot_autocorr(self, gmodel: Gmodel, converged: bool) -> None:
         if self.path_plot is None:
             return
-        self.savename_autocorr = self.path_plot / f"Plotfit_autocorr_{self.name_cube}.png"
+        self.savename_autocorr = self.path_plot / f"Plotfit_autocorr_{self.name_cube}{self.suffix}.png"
 
         xs = self.chekstep
         fig_ac, ax_ac = plt.subplots()
@@ -463,20 +424,36 @@ class Plotfit:
         self.chansep = float(np.abs(np.mean(np.diff(self.x))))
         self.bandwidth = float(self.xmax - self.xmin)
         self.bandwidh = self.bandwidth  # alias
+        
+    def get_residuals(self, G):
+        
+        if G==1:
+            model_totl = gauss(self.x,self.df.loc[0,f'A{G}'],self.df.loc[0,f'V{G}'],self.df.loc[0,f'S{G}']) + self.df.loc[0,f'B{G}']
+        else:
+            model_totl = np.sum([gauss(self.x,self.df.loc[0,f'A{G}{g}'],self.df.loc[0,f'V{G}{g}'],self.df.loc[0,f'S{G}{g}']) for g in range(1,G+1)],axis=0)+self.df.loc[0,f'B{G}']
+        residuals = self.y - model_totl
+        
+        return residuals
 
-    def fill_df_emcee(self, sampler: emcee.EnsembleSampler, names: np.ndarray, burnin: int, thin: int = 1) -> None:
+    def fill_df_emcee(self, sampler: emcee.EnsembleSampler, gmodel) -> None:
+        
+        burnin = int(2 * np.nanmax(self.old_tau))
+        thin = max(1, int(0.5 * np.nanmin(self.old_tau)))
+        
         if thin == 0:
             thin = 1
         flat_samples_mapped = sampler.get_chain(discard=burnin, flat=True, thin=thin)
         log_probs = sampler.get_log_prob(discard=burnin, flat=True, thin=thin)
         max_prob_index = int(np.nanargmax(log_probs))
+        
+        names = gmodel.names_param
+        
+        if 'A1'  in names: G=1
+        if 'A21' in names: G=2
+        if 'A31' in names: G=3
             
         if self.unconstrained:
-            flat_samples = flat_samples_mapped.copy()
-            if 'A1' in names:
-                flat_samples = demap_params_unconstrained(flat_samples_mapped, self.gmodel)
-            if 'A21' in names:
-                flat_samples = relabel_by_width(demap_params_unconstrained(flat_samples_mapped, self.gmodel),self.gmodel.names_param)
+            flat_samples = demap_params_unconstrained(flat_samples_mapped, gmodel)
         else:
             flat_samples = flat_samples_mapped.copy()
                 
@@ -498,19 +475,31 @@ class Plotfit:
                 self.df[label] = md
                 self.df[f"e-_{label}"] = md - lo
                 self.df[f"e+_{label}"] = hi - md
-
-        # Fill implicit params when not sampled
-        if ("A1" in names) and ("V1" not in names):
-            self.df["V1"] = 0.0
-        if ("A21" in names) and ("V21" not in names):
-            self.df["V21"] = self.df["V1"][0]
-        if ("A21" in names) and ("V22" not in names):
-            self.df["V22"] = self.df["V21"][0]
-        if ("A21" in names) and ("B2" not in names):
-            self.df["B2"] = self.df["B1"][0]
-
-        if "A21" in names:
-            self.flat_samples = flat_samples
+                
+        if 'A21' in names:
+            if self.dict_params['V21']=='V1':
+                self.df["V21"] = self.df["V1"][0]
+            if self.dict_params['V22']=='V21':
+                self.df["V22"] = self.df["V21"][0]
+            if self.dict_params['B2']=='B1':
+                self.df["B2"] = self.df["B1"][0]
+                
+        if 'A31' in names:
+            self.df['V31'] = self.df['V32'] = self.df['V33'] = self.df['V1'][0]
+            if self.dict_params['B2']=='B1':
+                self.df["B3"] = self.df["B1"][0]
+        self.flat_samples = flat_samples
+        
+        residuals = self.get_residuals(G=G)
+        self.df[f"N{G}"] = float(np.nanstd(residuals))
+        
+        if G==1:
+            A1,N1 = self.df.loc[0,['A1','N1']]
+            self.df['SNR1'] = A1/N1
+        else:
+            As = self.df.loc[0,[f'A{G}{g}' for g in range(1,G+1)]]
+            NN = self.df.loc[0,f'N{G}']
+            self.df[f'SNR{G}'] = np.sum(As) / NN
 
     def makefit_1G(
         self,
@@ -528,8 +517,9 @@ class Plotfit:
 
         res_1G, gmodel = self.makefit_1G_minimize(xx, yy, e_y, guess=guess, return_gmodel=True)
         guess_vec = np.float64([res_1G[param] for param in gmodel.names_param])
-        nwalkers = max(4, int(len(guess_vec) * 2))
-        ndim = len(guess_vec)
+        
+        nwalkers = len(guess_vec) * 4
+        ndim     = len(guess_vec)
         
         iS1 = _idx(gmodel.names_param,'S1')
         if guess_vec[iS1]<2*gmodel.dict_bound['S1'][0]:
@@ -554,7 +544,6 @@ class Plotfit:
             pos = np.clip(np.array(guess_vec) + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
             log_prob_1G = gmodel.log_prob_1G
         
-        self.gmodel    = gmodel
         self.gmodel_1G = gmodel
         self.stat = "1GFIT"
 
@@ -590,57 +579,85 @@ class Plotfit:
                 break
 
         # Summarize
-        self.burnin = int(2 * np.nanmax(self.old_tau))
-        self.thin = max(1, int(0.5 * np.nanmin(self.old_tau)))
-        self.fill_df_emcee(sampler, gmodel.names_param, self.burnin, self.thin)
+        self.fill_df_emcee(sampler, gmodel)
         self.writestat(f"{self.stat} - Done")
 
         self.df_params["S1"] = self.df["S1"][0]
-
-        A1, V1, S1, B1 = (self.df.loc[0, k] for k in ["A1", "V1", "S1", "B1"])
-        residual = yy - (gauss(xx, A1, V1, S1) + B1)
-        self.residual_1GFIT = residual
-
-        N1 = float(np.nanstd(residual))
-        SNR1 = float(A1) / N1 if N1 > 0 else np.nan
-        self.df["SNR1"], self.df["N1"] = SNR1, N1
         self.GFIT1_success = True
 
     # -----------------------------
     # 2-Gaussian fit (MCMC)
     # -----------------------------
-    def make_guess(self, dict_1Gfit: dict | None = None) -> Tuple[np.ndarray, np.ndarray]:
-        """Assemble initial guess vector for 2G from 1G results."""
-        dict_1Gfit = dict_1Gfit or {
-            "N1": self.df["N1"][0],
-            "B1": self.df["B1"][0],
-            "A1": self.df["A1"][0],
-            "V1": self.df["V1"][0],
-            "S1": self.df["S1"][0],
-        }
+    def make_guess(self) -> Tuple[np.ndarray, np.ndarray]:
+        A1,V1,S1,B1,N1 = self.df.loc[0,['A1','V1','S1','B1','N1']]
+        
         guess_map = {
             # "A21": dict_1Gfit["A1"] * 0.45,
             # "A22": dict_1Gfit["A1"] * 0.45,
-            "A21": dict_1Gfit["A1"] * 0.99,
-            "A22": dict_1Gfit["A1"] * 0.01,
-            "V21": dict_1Gfit["V1"],
-            "V22": dict_1Gfit["V1"],
-            "S21": dict_1Gfit["S1"]*1,
-            "S22": dict_1Gfit["S1"]*1.5,
-            "B2":  dict_1Gfit["B1"],
+            "A21": A1 * 0.5,
+            "A22": A1 * 0.5,
+            "V21": V1,
+            "V22": V1,
+            "S21": S1,
+            "S22": S1*1.1,
+            # 'S22': np.min([S1*5,self.dispmax-1]),
+            "B2":  B1,
         }
         if guess_map['S21']<self.dispmin:
-            guess_map['S21'] = dict_1Gfit['S1']
+            guess_map['S21'] = S1
         # if guess_map['S22']>self.dispmax: 
         # Ensure S21 <= S22 at start
         if guess_map["S21"] > guess_map["S22"]:
-            guess_map["S21"] = 0.5 * (dict_1Gfit["S1"] + self.dispmin)
+            guess_map["S21"] = 0.5 * (S1 + self.dispmin)
             
         names_param = np.array([k for k, status in self.dict_params.items() if status == "free"])
         guess = np.array([guess_map[p] for p in names_param], dtype=float)
         return guess, names_param
     
-    def makefit_2G(self, maxiter: int = 100_000) -> None:
+    def makefit_bg_pre2G(self, multiplier_mask_S1=5):
+        
+        V1, S1, B1, N1 = self.df.loc[0, ['V1', 'S1', 'B1', 'N1']]
+
+        # boolean mask instead of argwhere
+        mask = (self.x > V1 - multiplier_mask_S1*S1) & (self.x < V1 + multiplier_mask_S1*S1)
+        y_bgfit   = self.y[~mask]
+        e_y_bgfit = self.e_y[~mask]
+
+        if y_bgfit.size == 0:
+            # nothing to fit; fall back to B1
+            self.df.loc[0, 'B2'] = B1
+            return
+
+        # weighted mean (solution to argmin sum(((y-b)/e)**2))
+        w  = 1.0 / np.maximum(e_y_bgfit, np.finfo(float).tiny)**2
+        B2 = np.sum(w * y_bgfit) / np.sum(w)
+
+        # clip to your prior-like bounds
+        lo, hi = B1 - 3*N1, B1 + 3*N1
+        B2 = float(np.clip(B2, lo, hi))
+
+        self.df.loc[0, 'B2'] = B2
+        
+        return
+    
+    def symmeterise_x(self):
+        new_xmax = np.min([-1*self.xmin,self.xmax])
+        xi = -1*new_xmax
+        xf = new_xmax
+
+        df_limited = self.df_stacked.loc[self.df_stacked["x"].between(xi, xf)]
+        self.x   = np.asarray(df_limited["x"], dtype=float)
+        self.y   = np.asarray(df_limited["y"], dtype=float)
+        self.e_y = np.asarray(df_limited["e_y"], dtype=float)
+
+        self.xmin, self.xmax = map(float, np.nanpercentile(self.x, [0, 100]))
+        self.ymin, self.ymax = map(float, np.nanpercentile(self.y, [0, 100]))
+        self.chansep = float(np.abs(np.mean(np.diff(self.x))))
+        self.bandwidth = float(self.xmax - self.xmin)
+        self.bandwidh = self.bandwidth  # alias    
+        return
+    
+    def makefit_2G(self, maxiter: int = 100000) -> None:
 
         def enforce_narrow_first(trial, gmodel, margin_frac=1e-9):
             """
@@ -778,8 +795,9 @@ class Plotfit:
             # allow small negatives initially; later priors enforce physicality
             "A21": np.array([0 * self.ymax, self.ymax * 1.5], dtype=float),
             "A22": np.array([0 * self.ymax, self.ymax * 1.5], dtype=float),
-            "V21": np.array([-5 * S1, 5 * S1], dtype=float),
-            "V22": np.array([-5 * S1, 5 * S1], dtype=float),
+            
+            "V21": np.array([-5*S1,5*S1], dtype=float),
+            "V22": np.array([-5*S1,5*S1], dtype=float),
             "S21": np.array([self.dispmin, self.dispmax], dtype=float),
             "S22": np.array([self.dispmin, self.dispmax], dtype=float),
             # "S21": np.array([0.2*S1, self.dispmax], dtype=float),
@@ -791,36 +809,6 @@ class Plotfit:
             print(f"{self.header_printmsg} {self.name_cube} 2GFIT no-go; 1GFIT near bound")
             self.df_params["Reliable"] = "nearbound"
             return
-
-        # guess, names_param = self.make_guess()
-        # gmodel = Gmodel(self.x, self.y, self.e_y, names_param, dict_bound, self.df)
-        # gmodel.log_prob = gmodel.log_prob_2G
-
-        # self.guess_2gfit = guess
-        # self.gmodel = gmodel
-        # self.params_2gfit = names_param
-        # self.dict_bound = dict_bound.copy()
-
-        # # Initial prior sanity
-        # if not np.all(np.isfinite(gmodel.log_prior_2G_diagnose(guess))):
-        #     pprint(dict_bound)
-        #     self.print_diagnose_params(gmodel, guess)
-        #     self.make_atlas()
-        #     raise ValueError(f"{self.header_printmsg} {self.name_cube}'s initial guess violates priors")
-
-        # nwalkers = max(4, int(len(guess) * 2))
-        # ndim = len(guess)
-        # lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
-        # ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
-        # pos = np.clip(guess + 1e-5 * np.random.randn(nwalkers, ndim), lb, ub)
-
-        # sampler = emcee.EnsembleSampler(
-        #     nwalkers,
-        #     ndim,
-        #     gmodel.log_prob,
-        #     moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
-        # )
-        # self.sampler = sampler
         
         guess, names_param = self.make_guess()
         iS21,iS22 = _idx(names_param,'S21'),_idx(names_param,'S22')
@@ -828,6 +816,10 @@ class Plotfit:
             guess[iS21] = np.mean(dict_bound['S21'])
             guess[iS22] = np.mean(dict_bound['S22'])+1
             
+        if self.dict_params['B2']=='fix':
+            self.makefit_bg_pre2G()
+        self.symmeterise_x()
+        
         gmodel = Gmodel(self.x, self.y, self.e_y, names_param, dict_bound, self.df)
         
         if self.GFIT2_redo:
@@ -836,7 +828,6 @@ class Plotfit:
 
         self.guess_2gfit = guess
         self.gmodel = gmodel
-        self.params_2gfit = names_param
         self.dict_bound = dict_bound.copy()
         
         ndim = len(guess)
@@ -861,6 +852,8 @@ class Plotfit:
             # guess = np.clip(guess, lb, ub)
             guess = relabel_by_width(map_params_unconstrained(guess, gmodel),gmodel.names_param)
             
+            self.guess_2G_unconstrained = guess.copy()
+            
             pos = guess + 0.1*np.random.randn(nwalkers,ndim)
         else:
             # Clip initial walkers to bounds
@@ -882,7 +875,12 @@ class Plotfit:
             nwalkers,
             ndim,
             gmodel.log_prob,
-            moves=[(emcee.moves.DEMove(), 0.8), (emcee.moves.DESnookerMove(), 0.2)],
+            moves = [
+                (emcee.moves.StretchMove(a=3.0),       0.45),  # bigger a => longer jumps
+                (emcee.moves.WalkMove(s=2, nsplits=3), 0.25),  # robust local exploration
+                (emcee.moves.DEMove(),                 0.20),  # differential evolution
+                (emcee.moves.DESnookerMove(),          0.10),  # helps in narrow valleys
+            ]
         )
         self.sampler = sampler        
 
@@ -929,24 +927,13 @@ class Plotfit:
                 pass
 
         # Summarize
-        self.burnin = int(2 * np.nanmax(self.old_tau))
-        self.thin = max(1, int(0.5 * np.nanmin(self.old_tau)))
-        self.fill_df_emcee(sampler, gmodel.names_param, self.burnin, self.thin)
-
-        # Residuals
-        A21, A22, V21, V22, S21, S22, B2 = (self.df.loc[0, k] for k in ["A21", "A22", "V21", "V22", "S21", "S22", "B2"])
-        model_narw = gauss(self.x, A21, V21, S21) + B2 / 2.0
-        model_brod = gauss(self.x, A22, V22, S22) + B2 / 2.0
-        residual = self.y - (model_narw + model_brod)
-        self.residual_2GFIT = residual
-
-        self.df["N2"] = float(np.nanstd(residual))
-        self.df["SNR2"] = (float(A21) + float(A22)) / self.df["N2"][0] if self.df["N2"][0] > 0 else np.nan
+        self.fill_df_emcee(sampler, gmodel)
 
         F, crit = do_Ftest(gmodel, self.df)
         self.df["F-test"], self.df["F-crit"] = F, crit
 
         # Area metrics
+        A21,S21,A22,S22 = self.df.loc[0,['A21','S21','A22','S22']]
         An, Ab = gaussian_area(A21, S21), gaussian_area(A22, S22)
         self.df_params["SNR2"] = self.df["SNR2"][0]
         self.df_params["sn"], self.df_params["sb"] = S21, S22
@@ -954,60 +941,158 @@ class Plotfit:
         self.df_params["At"] = An + Ab
         self.df_params["sn/sb"] = self.df_params["sn"][0] / self.df_params["sb"][0]
         self.df_params["An/At"] = self.df_params["An"][0] / self.df_params["At"][0]
-        self.df_params["Asym"] = get_asymmetry_residuals(self.y, residual)
 
         self.GFIT2_success = True
         self.writestat(f"{self.stat} - Done")
 
+    def makefit_3G(self, maxiter=100000):
+
+        self.stat = "3GFIT"
+        self.maxiter = maxiter
+        self.slope_tau = self.slope_tau_2G
+
+        S1 = float(self.df["S1"][0])
+        B1 = float(self.df["B1"][0])
+        N1 = float(self.df["N1"][0])
+
+        dict_bound = {
+            # allow small negatives initially; later priors enforce physicality
+            "A31": np.float64([0.0,1.0])*self.ymax,
+            "A32": np.float64([0.0,1.0])*self.ymax,
+            "A33": np.float64([0.0,0.5])*self.ymax,
+            "V31": np.float64([-5*S1,5*S1]),
+            "V32": np.float64([-5*S1,5*S1]),
+            "V33": np.float64([-5*S1,5*S1]),
+            "S31": np.float64([self.dispmin, 0.7*S1]),
+            "S32": np.float64([0.7*S1, 1.2*S1]),
+            "S33": np.float64([1.2*S1, self.dispmax]),
+            "B3" : np.float64([B1 - N1, B1 + N1]),
+        }
+
+        self.symmeterise_x()
+        if self.dict_params['B2']=='B1':
+            names_param = ['A31','A32','A33','S31','S32','S33']
+            guess = np.float64(
+                [0.3*self.ymax,0.3*self.ymax,0.3*self.ymax,
+                0.5*S1, 1.0*S1, 2*S1])
+        else:
+            names_param = ['A31','A32','A33','S31','S32','S33','B3']
+            guess = np.float64(
+                [0.3*self.ymax,0.3*self.ymax,0.3*self.ymax,
+                0.5*S1, 1.0*S1, 2*S1,
+                B1])
+        gmodel = Gmodel(self.x, self.y, self.e_y, names_param, dict_bound, self.df)
+        self.gmodel = gmodel
+        
+        ndim = len(guess)
+        nwalkers = 4 * ndim
+        
+        lb = np.array([gmodel.dict_bound[p][0] for p in gmodel.names_param])
+        ub = np.array([gmodel.dict_bound[p][1] for p in gmodel.names_param])
+        w  = ub - lb
+
+        # clip to the inner 10–90% of each bound
+        lb = lb + 0.1 * w
+        ub = ub - 0.1 * w
+        
+        if self.unconstrained:
+            if self.dict_params['B2']=='B1':
+                log_prob_3G = gmodel.log_prob_3G_unconstrained_V31xV32xV33xB3x
+            else:
+                log_prob_3G = gmodel.log_prob_3G_unconstrained_V31xV32xV33xB3r
+            gmodel.log_prob = log_prob_3G
+            
+            # guess = relabel_by_width(map_params2G_unconstrained(guess, gmodel),gmodel.names_param)
+            # res   = minimize(gmodel.log_prob_guess, x0=guess, method='L-BFGS-B')
+            # guess = demap_params2G_unconstrained(res.x, gmodel)
+            # guess = np.clip(guess, lb, ub)
+                        
+            guess = map_params_unconstrained(guess, gmodel)
+            pos = guess + 0.1*np.random.randn(nwalkers,ndim)
+        
+        sampler = emcee.EnsembleSampler(
+            nwalkers,
+            ndim,
+            gmodel.log_prob,
+            moves = [
+                (emcee.moves.StretchMove(a=3.0),       0.45),  # bigger a => longer jumps
+                (emcee.moves.WalkMove(s=2, nsplits=3), 0.25),  # robust local exploration
+                (emcee.moves.DEMove(),                 0.20),  # differential evolution
+                (emcee.moves.DESnookerMove(),          0.10),  # helps in narrow valleys
+            ]
+        )
+        self.sampler = sampler        
+
+        self._reset_autocorr_buffers(self.maxiter)
+        
+        try:
+            for state in sampler.sample(pos, iterations=self.maxiter):
+                if sampler.iteration % self.testlength:
+                    continue
+                if self.check_converged(sampler, gmodel, generate_plot=self.plot_autocorr):
+                    break
+        except ValueError:
+            print(guess)
+            pprint(pos)
+            print(self.name_cube)
+            raise
+
+        # Summarize
+        self.fill_df_emcee(sampler, gmodel)
+        self.writestat(f"{self.stat} - Done")
+
+
     # -----------------------------
     # Resampling
     # -----------------------------
-    def resample(self, nsample: int = 1499, pbar_resample: bool = False) -> None:
-        SNR1, SNR2 = self.df.loc[0, ["SNR1", "SNR2"]]
-        if not (np.isfinite(SNR1) and np.isfinite(SNR2)):
-            return
-
-        self.nsample = int(nsample)
-        self.df_params["SNR2"] = SNR2
+    def resample(self, G: int, nsample: int = 1499, pbar_resample: bool = False) -> None:
+        
+        SNR1 = self.df.loc[0,'SNR1']
+        if not np.isfinite(SNR1): return
+        
+        SNRG = self.df.loc[0,f'SNR{G}']
+        if not np.isfinite(SNRG): return
+        
+        self.df_params[f"SNR{G}"] = SNRG
         self.stat = "Resample"
 
-        names_param = np.array(self.params_2gfit)
+        names_param = np.array(self.gmodel.names_param)
+        
         guess = np.array([self.df[label][0] for label in names_param], dtype=float)
-        resampled = np.full((self.nsample, len(guess)), np.nan, dtype=float)
-        S1s = np.full(self.nsample, np.nan, dtype=float)
-
         guess_1G = self.df.loc[0, ["A1", "V1", "S1", "B1"]].to_numpy(dtype=float)
         if self.unconstrained:
             guess_1G = map_params_unconstrained(guess_1G, self.gmodel_1G)
-            guess = relabel_by_width(map_params_unconstrained(guess,self.gmodel),self.gmodel.names_param)
-            
+            guess = map_params_unconstrained(guess,self.gmodel)
+        
+        S1s = np.full(nsample, np.nan, dtype=float)
+        resampled = np.full((nsample, len(names_param)), np.nan, dtype=float)    
+        
         gmodel_resample = copy.deepcopy(self.gmodel)
+        residuals_orig = self.get_residuals(G=G)
             
         pbar = tqdm(total=nsample) if pbar_resample else None
         timei = time.time()
+        
+        xx  = self.x
+        yy  = self.y
+        e_y = self.e_y
+        
+        leny = len(yy)
 
         for j in range(nsample):
             while True:
                 # Bootstrap residuals
-                y_w_noise = self.y + np.random.choice(self.residual_2GFIT, len(self.y), replace=True)
+                y_w_noise = yy + np.random.choice(residuals_orig, leny, replace=True)
                 ymax = float(np.nanmax(y_w_noise))
 
                 gmodel = copy.deepcopy(gmodel_resample)  # type: ignore[assignment]
                 gmodel.y = y_w_noise
-
-                res_1G = self.makefit_1G_minimize(self.x, y_w_noise, self.e_y, guess=guess_1G)
+                
+                res_1G = self.makefit_1G_minimize(xx, y_w_noise, e_y, guess=guess_1G)
                 A1, V1, S1, B1 = (res_1G[k] for k in ["A1", "V1", "S1", "B1"])
                 
-                # if self.unconstrained:
-                #     A1 = _softplus(A1)
-                #     S1 = _softplus(S1)
-
-                # Update bounds that depend on data scale
-                # gmodel.update_bound("S21", np.array([self.dispmin,S1], dtype=np.float64))
-                # If B2 were free, could also update bounds using N1
-                # gmodel.update_bound("B2", np.array([B1 - N1, B1 + N1], dtype=np.float64))
-
                 res = minimize(gmodel.log_prob_guess, guess, method="Nelder-Mead", tol=1e-8)
+                # res = minimize(gmodel.log_prob_guess, self.guess_2G_unconstrained, method="Nelder-Mead", tol=1e-8)
                 if np.isfinite(res.fun):
                     S1s[j] = float(S1)
                     resampled[j, :] = res.x
@@ -1027,7 +1112,7 @@ class Plotfit:
             pbar.close()
             
         if self.unconstrained:
-            resampled = relabel_by_width(demap_params_unconstrained(resampled,self.gmodel),self.gmodel.names_param)
+            resampled = demap_params_unconstrained(resampled,self.gmodel)
         self.resampled = resampled
 
         # Fill resampled summary
@@ -1035,29 +1120,28 @@ class Plotfit:
             data_label = resampled[:, i]
             self.df_resampled[label] = np.nanmean(data_label)
             self.df_resampled[f"e_{label}"] = np.nanstd(data_label)
-
-        # Stable index helpers
-        idx = {name: int(np.where(self.params_2gfit == name)[0][0]) for name in ["S21", "S22", "A21", "A22"]}
-        sns = resampled[:, idx["S21"]]
-        sbs = resampled[:, idx["S22"]]
-        Ans = gaussian_area(resampled[:, idx["A21"]], sns)
-        Abs = gaussian_area(resampled[:, idx["A22"]], sbs)
-        Ats = Ans + Abs
-
+            
         if self.truth_from_resampling:
             # print(f"[Plotfit {self.name_cube}] truth_from_resampling=True; filling df with resampled values")
             for i,param in enumerate(self.gmodel.names_param):  # type: ignore[union-attr]
                 # self.df[param] = np.median(sort_outliers(resampled[:, i]))
                 self.df[param] = np.median(resampled[:, i])
+                
+        self.df_params["e_S1"] = np.nanstd(sort_outliers(S1s))
 
-        # Update df_params with central values
-        A21, A22, S21, S22 = (self.df.loc[0, k] for k in ["A21", "A22", "S21", "S22"])
+        iA21,iA22,iS21,iS22 = _idx(names_param,f'A{G}1'),_idx(names_param,f'A{G}2'),_idx(names_param,f'S{G}1'),_idx(names_param,f'S{G}2')
+        sns = resampled[:, iS21]
+        sbs = resampled[:, iS22]
+        Ans = gaussian_area(resampled[:, iA21], sns)
+        Abs = gaussian_area(resampled[:, iA22], sbs)
+        Ats = Ans + Abs
+
+        A21, A22, S21, S22 = (self.df.loc[0, k] for k in [f"A{G}1", f"A{G}2", f"S{G}1", f"S{G}2"])
         An, Ab = gaussian_area(A21, S21), gaussian_area(A22, S22)
         self.df_params["sn"], self.df_params["sb"] = S21, S22
         self.df_params["An"], self.df_params["Ab"] = An, Ab
         self.df_params["At"] = An + Ab
         
-        self.df_params["e_S1"] = np.nanstd(sort_outliers(S1s))
         self.df_params["e_sn"] = np.nanstd(sort_outliers(sns))
         self.df_params["e_sb"] = np.nanstd(sort_outliers(sbs))
         self.df_params["e_An"] = np.nanstd(sort_outliers(Ans))
@@ -1077,6 +1161,12 @@ class Plotfit:
         self.df_params["e_sn/sb"] = np.nanstd(sort_outliers(sns/sbs))
         self.df_params["e_An/At"] = np.nanstd(sort_outliers(Ans/Ats))
         self.df_params["e_log(sb-sn)"] = np.nanstd(sort_outliers(np.log10(sbs - sns)))
+        
+        if G==3:
+            self.df_params['s3'] = self.df.loc[0,'S33']
+            iS33 = _idx(names_param,'S33')
+            s3s = resampled[:,iS33]
+            self.df_params['e_s3'] = np.nanstd(sort_outliers(s3s))
 
         self.resample_success = True
         self.df_params["Reliable"] = "Y"
@@ -1094,19 +1184,19 @@ class Plotfit:
         if self.dict_params["V21"] == 0:
             self.dict_params["V21"] = "0"
 
-        if self.dict_params["V21"] not in ["0", "free", "fix"]:
-            raise TypeError(f'{self.header_printmsg} V21 must be one of {"0","free","fix"}.')
-        if self.dict_params["V22"] not in ["0", "free", "fix"]:
-            raise TypeError(f'{self.header_printmsg} V22 must be one of {"0","free","fix"}.')
-        if self.dict_params["B2"] not in ["free", "fix"]:
-            raise TypeError(f'{self.header_printmsg} B2 must be one of {"free","fix"}.')
+        if self.dict_params["V21"] not in ["0", "free", "V1"]:
+            raise TypeError(f'{self.header_printmsg} V21 must be one of {"0","free","V1"}.')
+        if self.dict_params["V22"] not in ["0", "free", "V21"]:
+            raise TypeError(f'{self.header_printmsg} V22 must be one of {"0","free","V21"}.')
+        if self.dict_params["B2"] not in ["free", "fix", "B1"]:
+            raise TypeError(f'{self.header_printmsg} B2 must be one of {"free","fix","B1"}.')
 
         if self.dict_params["V21"] == "0" and self.dict_params["V22"] == "free":
-            print(f"{self.header_printmsg} Setting V22=fix; V22 free not possible when V21==0")
-            self.dict_params["V22"] = "fix"
-        if self.dict_params["V21"] == "fix" and self.dict_params["V22"] == "free":
-            print(f"{self.header_printmsg} Setting V22=fix; V22 free not possible when V21==fix")
-            self.dict_params["V22"] = "fix"
+            print(f"{self.header_printmsg} Setting V22=V21; V22 free not possible when V21==0")
+            self.dict_params["V22"] = "V21"
+        if self.dict_params["V21"] == "V1" and self.dict_params["V22"] == "free":
+            print(f"{self.header_printmsg} Setting V22=V21; V22 free not possible when V21==V1")
+            self.dict_params["V22"] = "V21"
 
     def check_stacked(self) -> bool:
         if np.all(self.y == 0) or np.all(~np.isfinite(self.y)):
@@ -1123,7 +1213,7 @@ class Plotfit:
 
     def check_list_disp(self) -> bool:
         # Bounds from spectral resolution & bandwidth
-        self.dispmin = 0 # (self.chansep / 2.355) #* 3.0
+        self.dispmin = (self.chansep / 2.355) #* 3.0
         self.dispmax = self.bandwidth / 2.355
 
         if (self.dispmax - self.dispmin) < 2:
@@ -1151,8 +1241,8 @@ class Plotfit:
             return
         
         if SNR1<20 and self.dict_params['B2']=='free':
-            print(f"{self.header_printmsg} {self.name_cube} Forcing B2=fix; SNR1<20")
-            self.dict_params['B2']='fix'
+            print(f"{self.header_printmsg} {self.name_cube} Forcing B2=B1; SNR1<20")
+            self.dict_params['B2']='B1'
             
     def evaluate_2GFIT(self) -> None:
         A21, A22, N2, SNR2 = self.df.loc[0, ["A21", "A22", "N2", "SNR2"]]
@@ -1184,38 +1274,40 @@ class Plotfit:
             return
 
         # Skewness/kurtosis diagnostics on posteriors (after outlier trimming)
-        for param in ["A21", "A22", "S21", "S22"]:
-            p_idx = int(np.where(self.params_2gfit == param)[0][0])
-            params = sort_outliers(self.flat_samples[:, p_idx])  # type: ignore[index]
-            self.df[f"Skew_{param}"] = skew(params)
-            self.df[f"Kurt_{param}"] = kurtosis(params)
+        # for param in ["A21", "A22", "S21", "S22"]:
+        #     p_idx = int(np.where(self.gmodel.names_param == param)[0][0])
+        #     params = sort_outliers(self.flat_samples[:, p_idx])  # type: ignore[index]
+        #     self.df[f"Skew_{param}"] = skew(params)
+        #     self.df[f"Kurt_{param}"] = kurtosis(params)
 
-        skew_S21 = self.df["Skew_S21"][0]
-        skew_S22 = self.df["Skew_S22"][0]
+        # skew_S21 = self.df["Skew_S21"][0]
+        # skew_S22 = self.df["Skew_S22"][0]
 
-        if (skew_S21 > self.skew_thres) and not (skew_S22 < -self.skew_thres):
-            self.df_params["Reliable"] = "S21_at_edge"
-            self.GFIT2_success = False
-            return
-        if not (skew_S21 > self.skew_thres) and (skew_S22 < -self.skew_thres):
-            self.df_params["Reliable"] = "S22_at_edge"
-            self.GFIT2_success = False
-            return
-        if (skew_S21 < -self.skew_thres) and (skew_S22 > self.skew_thres):
-            self.df_params["Reliable"] = "S21~S22"
-            self.GFIT2_success = False
-            return
-        if (abs(skew_S21) > self.skew_thres) and (abs(skew_S22) > self.skew_thres):
-            self.df_params["Reliable"] = "disps_at_edge"
-            self.GFIT2_success = False
-            return
+        # if (skew_S21 > self.skew_thres) and not (skew_S22 < -self.skew_thres):
+        #     self.df_params["Reliable"] = "S21_at_edge"
+        #     self.GFIT2_success = False
+        #     return
+        # if not (skew_S21 > self.skew_thres) and (skew_S22 < -self.skew_thres):
+        #     self.df_params["Reliable"] = "S22_at_edge"
+        #     self.GFIT2_success = False
+        #     return
+        # if (skew_S21 < -self.skew_thres) and (skew_S22 > self.skew_thres):
+        #     self.df_params["Reliable"] = "S21~S22"
+        #     self.GFIT2_success = False
+        #     return
+        # if (abs(skew_S21) > self.skew_thres) and (abs(skew_S22) > self.skew_thres):
+        #     self.df_params["Reliable"] = "disps_at_edge"
+        #     self.GFIT2_success = False
+        #     return
 
     # -----------------------------
     # Plotter wrapper
     # -----------------------------
-    def make_atlas(self) -> None:
+    def make_atlas(self, gmodel=None) -> None:
         if self.path_plot is None:
             return
+        
+        if gmodel is None: gmodel = self.gmodel
         plotter = Plotter(
             self.path_plot,
             self.name_cube,
@@ -1223,12 +1315,15 @@ class Plotfit:
             self.list_disp,
             self.df,
             self.df_params,
-            self.gmodel,
+            gmodel,
             self.sampler,
             self.resampled,
             self.unconstrained
         )
-        plotter.makeplot_atlas()
+        
+        if 'A31' in gmodel.names_param: G=3
+        else: G=2
+        plotter.makeplot_atlas(G)
 
     # -----------------------------
     # Public run method
@@ -1245,10 +1340,15 @@ class Plotfit:
         if not self.check_list_disp():
             return
 
-        # self.limit_range(multiplier_disp=50)
+        # self.limit_range(multiplier_disp=10)
         self.makefit_1G(self.x, self.y, self.e_y)
         self.evaluate_1GFIT()
-        self.make_atlas()
+        self.make_atlas(gmodel=self.gmodel_1G)
+        
+        # self.makefit_3G()
+        # self.make_atlas()
+        # self.resample(G=3, nsample=nsample_resample, pbar_resample=pbar_resample)
+        # self.make_atlas()
 
         if self.GFIT1_success:
             self.makefit_2G()
@@ -1257,7 +1357,7 @@ class Plotfit:
             # if self.GFIT2_redo:
             #     self.makefit_2G()
             #     self.make_atlas()
-            self.resample(nsample=nsample_resample, pbar_resample=pbar_resample)
+            self.resample(G=2, nsample=nsample_resample, pbar_resample=pbar_resample)
             self.evaluate_final()
             self.make_atlas()
 

@@ -102,16 +102,6 @@ def get_asymmetry_residuals(yy,residual):
     
     return asym
     
-    
-@njit(fastmath=True, cache=True)
-def model_1G(xx,A1,V1,S1,B1):
-    model = gauss(xx, A1,V1,S1)+B1
-    return model
-
-@njit(fastmath=True, cache=True)
-def model_2G(xx,A21,A22,V21,V22,S21,S22,B2):
-    return gauss(xx, A21,V21,S21) + gauss(xx, A22,V22,S22) + B2
-
 @njit(fastmath=True, cache=True)
 def linmap(param, low, div):
     return (param-low) * div
@@ -119,6 +109,24 @@ def linmap(param, low, div):
 @njit(fastmath=True, cache=True)
 def chisq_gauss2(y,model,inv_e_y):
     return -0.5 * np.sum(np.square((y - model) * inv_e_y))
+
+@njit(fastmath=True, cache=True)
+def logL_gauss_sum_reduce(x, y, inv_e_y,
+                          A, V, S,  # length-K
+                          B):
+    acc = 0.0
+    K = A.size
+    for i in range(x.size):
+        m = B
+        xi = x[i]
+        # sum Gaussians
+        for k in range(K):
+            Sk = S[k] if S[k] > 1e-12 else 1e-12
+            d = (xi - V[k]) / Sk
+            m += A[k] * np.exp(-0.5 * d * d)
+        z = (y[i] - m) * inv_e_y[i]
+        acc += z * z
+    return -0.5 * acc
 
 @njit(fastmath=True, cache=True)
 def test_off_bounds(mapped):
@@ -315,3 +323,14 @@ def check_sanity_softplus(params):
     for param in params:
         if param<-20 or param>1e10: return False
     return True
+
+@njit(fastmath=True, cache=True)
+def log_L_3G_jit(x, y, inv_e_y, A31,A32,A33, V31,V32,V33, S31,S32,S33, B3):
+    # model = gauss(x, A31,V31,S31) + gauss(x, A32,V32,S32) + gauss(x, A33,V33,S33) + B3
+    # return chisq_gauss2(y, model, inv_e_y)
+    
+    A = np.array([A31, A32, A33])
+    V = np.array([V31, V32, V33])
+    S = np.array([S31, S32, S33])
+    # choose one:
+    return logL_gauss_sum_reduce(x, y, inv_e_y, A, V, S, B3)

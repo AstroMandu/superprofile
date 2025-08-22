@@ -353,7 +353,8 @@ class ShiftnStack:
         df['e_y'] = e_y.value
         df['N']   = NN
         
-        df = df.loc[df['N']>28.59].reset_index(drop=True)
+        pixels_in_beam = self.beam.sr / (self.cd*self.cd).to(u.sr)
+        df = df.loc[df['N']>pixels_in_beam].reset_index(drop=True)
 
         self.xx  = df['x']
         self.yy  = df['y']

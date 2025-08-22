@@ -1,5 +1,5 @@
 import numpy as np
-from .subroutines_Plotfitter import model_1G, model_2G, linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw, _idx,check_sanity, check_sanity_softplus, bound_to_span
+from .subroutines_Plotfitter import linmap, chisq_gauss2, test_off_bounds, bound_to_div, log_L_1G_jit, log_L_2G_jit, _softplus, _sigmoid_mapped, _softabs, _clip_raw, _idx,check_sanity, check_sanity_softplus, bound_to_span, log_L_3G_jit
 from math import isfinite
 from pprint import pprint
 
@@ -15,11 +15,11 @@ class Gmodel:
                  df_plotfit=None):
 
         # Ensure consistent float64 typing for Numba compatibility and performance
-        self.x = np.asarray(xx, dtype=np.float64)
-        self.y = np.asarray(yy, dtype=np.float64)
+        self.x   = np.asarray(xx, dtype=np.float64)
+        self.y   = np.asarray(yy, dtype=np.float64)
         self.e_y = np.asarray(e_y, dtype=np.float64)
         self.inv_e_y = 1. / self.e_y
-
+        
         self.delta_disp = 0.
         
         self._low  = np.float64([dict_bound[k][0]             for k in names_param])
@@ -27,6 +27,7 @@ class Gmodel:
         self._spn  = np.float64([bound_to_span(dict_bound[k]) for k in names_param])
 
         if df_plotfit is not None:
+            self.A1  = np.float64(df_plotfit.loc[0, 'A1'])
             self.S1  = np.float64(df_plotfit.loc[0, 'S1'])
             self.B1  = np.float64(df_plotfit.loc[0, 'B1'])
             self.V1  = np.float64(df_plotfit.loc[0, 'V1'])
@@ -59,7 +60,7 @@ class Gmodel:
 
         self.df = df_plotfit
         self.names_param = names_param
-        self.dict_bound = dict_bound
+        self.dict_bound  = dict_bound
 
     # @profile
     # def map_params(self, params):
@@ -73,10 +74,11 @@ class Gmodel:
     
     def update_bound(self, name_param, bound):
         bound = np.float64(bound)
-        argwhere = np.argwhere(self.names_param==name_param).item()
-        self._low[argwhere] = bound[0]
-        self._div[argwhere] = bound_to_div(bound)
-        self._spn[argwhere] = bound_to_span(bound)
+        print(self.names_param)
+        iP = _idx(self.names_param,name_param)
+        self._low[iP] = bound[0]
+        self._div[iP] = bound_to_div(bound)
+        self._spn[iP] = bound_to_span(bound)
         self.dict_bound[name_param] = bound
     
     # def map_params(self, params):
@@ -184,8 +186,37 @@ class Gmodel:
         if params[4]>params[5]: return -np.inf
         if not check_sanity(params): return -np.inf
         uA21,uA22,uV21,uV22,uS21,uS22,uB2 = _sigmoid_mapped(params, self._low, self._spn)
-        if uS21>uS22: return -np.inf
         logl = self.log_L_2G(uA21,uA22,uV21,uV22,uS21,uS22,uB2)
+        return logl if isfinite(logl) else -np.inf
+    
+    def log_L_3G(self, A31,A32,A33, V31,V32,V33, S31,S32,S33, B3):
+        return log_L_3G_jit(self.x, self.y, self.inv_e_y, A31,A32,A33, V31,V32,V33, S31,S32,S33, B3)
+    
+    def log_prob_3G_unconstrained_V31xV32xV33xB3r(self,params):
+        if not check_sanity(params): return -np.inf
+        uA31,uA32,uA33,uS31,uS32,uS33,uB3 = _sigmoid_mapped(params, self._low, self._spn)
+        if not uS31<uS32<uS33: return -np.inf
+        uV31 = uV32 = uV33 = self.V1
+        logl = self.log_L_3G(uA31,uA32,uA33, uV31,uV32,uV33 ,uS31,uS32,uS33, uB3)
+        return logl if isfinite(logl) else -np.inf
+    
+    def log_prob_3G_unconstrained_V31xV32xV33xB3x(self,params):
+        if not check_sanity(params): return -np.inf
+        uA31,uA32,uA33,uS31,uS32,uS33 = _sigmoid_mapped(params, self._low, self._spn)
+        if not uS31<uS32<uS33: return -np.inf
+        uV31 = uV32 = uV33 = self.V1
+        uB3  = self.B1
+        logl = self.log_L_3G(uA31,uA32,uA33, uV31,uV32,uV33 ,uS31,uS32,uS33, uB3)
+        return logl if isfinite(logl) else -np.inf
+    
+    def log_prob_3G_unconstrained_G2xB2x(self,params):
+        if not check_sanity(params): return -np.inf
+        uA31,uA33,uS31,uS33 = _sigmoid_mapped(params, self._low, self._spn)
+        uA32,uS32 = self.A1, self.S1
+        if not uS31<uS32<uS33: return -np.inf
+        uV31 = uV32 = uV33 = self.V1
+        uB3  = self.B1
+        logl = self.log_L_3G(uA31,uA32,uA33, uV31,uV32,uV33 ,uS31,uS32,uS33, uB3)
         return logl if isfinite(logl) else -np.inf
 
     def array_to_dict_guess(self, params):

@@ -32,6 +32,9 @@ matplotlib.use('Agg')
 # =========================
 path_data = Path('/home/mskim/workspace/research/data')
 homedirs = [
+    
+    # path_data/'THINGS_halfbeam'
+    
     path_data/'AVID'
     
     # path_data/'test'
@@ -44,8 +47,8 @@ homedirs = [
 nametype_cube   = 'cube.fits'
 nametype_galaxy = '*'
 
-multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.05)]
-# multipliers = [0.2]
+# multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.05)]
+multipliers = [1.0]
 # col_radius = 'r25';      radtag='r25'
 col_radius = 'RHI(kpc)'; radtag='RHI'
 suffix = '_'
@@ -55,12 +58,12 @@ key_classify = '2'
 
 use_secondary_vf = True
 truth_from_resampling = 1
-num_threads = 50
+num_threads = 20
 
 bool_overwrite     = 1
 remove_temp        = 1
 
-overwrite_classify = 1
+overwrite_classify = 0
 bool_do_clfy       = 1
 
 bool_do_whole  = 0
@@ -71,6 +74,7 @@ bool_do_rings  = 0
 
 bool_do_angles = 1
 angles = [0,15,30,45,60,75,90,105,120,135,150,165,180,195,210,225,240,255,270,285,300,315,330,345]
+# angles = [30]
 
 bool_pack_output = 0
 nsample_resample = 1499 # p~0.01
@@ -79,8 +83,8 @@ dict_glob = {}
 dict_glob['dict_params']={
     'A21':'free',
     'A22':'free',
-    'V21':'fix',
-    'V22':'fix',
+    'V21':'V1','V22':'V21',
+    # 'V21':'free','V22':'free',
     'S21':'free',
     'S22':'free',
     'B2' :'free'
@@ -151,7 +155,7 @@ def write_output(suffix):
     if not df.empty:
         for c in df.columns:
             if c != 'Name':
-                df[c] = pd.to_numeric(df[c], errors='ignore')
+                df[c] = pd.to_numeric(df[c])
         pd.options.display.float_format = '{:.3E}'.format
         df.to_string(savename_gfit, index=False)
         for t in temps: os.remove(t)
@@ -162,7 +166,7 @@ def write_output(suffix):
     if not dfp.empty:
         for c in dfp.columns:
             if c not in ('Name','Reliable'):
-                dfp[c] = pd.to_numeric(dfp[c], errors='ignore')
+                dfp[c] = pd.to_numeric(dfp[c])
         pd.options.display.float_format = '{:.3E}'.format
         dfp.to_string(savename_para, index=False)
         for t in temps: os.remove(t)
@@ -383,7 +387,7 @@ timei = time.time()
 for homedir in homedirs:
     homedir = Path(homedir)
     path_output = None
-    # path_output = homedir.parent/(homedir.name+'_')
+    path_output = homedir.parent/(homedir.name+'_2GFIT_G2n~G2b')
 
     # discover cubes
     paths_cube = [Path(p) for p in glob.glob(str(homedir / f'{nametype_galaxy}/{nametype_cube}'))]
@@ -488,8 +492,8 @@ for homedir in homedirs:
     if bool_do_angles and angles:
         def _dispatch(tag, a, w):
             if tag=='base': return worker_angle(a, w, paths_cube, path_data/'catalog/cat_diameters.csv')
-            if tag=='O05':  return worker_angle_O05(a, w, paths_cube, path_data/'catalog/cat_diameters.csv')
-            if tag=='O10':  return worker_angle_O10(a, w, paths_cube, path_data/'catalog/cat_diameters.csv')
+            # if tag=='O05':  return worker_angle_O05(a, w, paths_cube, path_data/'catalog/cat_diameters.csv')
+            # if tag=='O10':  return worker_angle_O10(a, w, paths_cube, path_data/'catalog/cat_diameters.csv')
 
         tasks_180 = [('base', a, 180) for a in angles] + [('O05', a, 180) for a in angles] + [('O10', a, 180) for a in angles]
         with ProcessPoolExecutor(max_workers=num_threads) as ex:
