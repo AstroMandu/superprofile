@@ -1,0 +1,1 @@
+from .class_Plotfitter_emcee import Plotfit

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.fits
+*.npy
+*.h5
+.ipynb_checkpoints/
