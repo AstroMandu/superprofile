@@ -31,7 +31,7 @@ class EvaluationMixin:
             # 1. Get the log-probs first to find the MAP index
             # We do this before thinning to find the absolute best point found
             full_log_probs = sampler.get_log_prob(discard=burnin, flat=True)
-            best_index = np.argmax(full_log_probs)
+            # best_index = np.argmax(full_log_probs)
             
             # 2. Now get the thinned chain for percentiles
             flat_deconstr = sampler.get_chain(discard=burnin, flat=True, thin=thin)
@@ -93,7 +93,10 @@ class EvaluationMixin:
             # self.df['WAIC'] = compute_waic(full_log_probs)
             
             log_l_max = full_log_probs.max()
-            self.df['AIC'],self.df['BIC'],self.df['AICc'] = compute_aic_bic_aicc(log_l_max, npars, len(gmodel.x))
+            if 'S1'  in names: G=1
+            if 'S21' in names: G=2
+            if 'S31' in names: G=3
+            self.df[f'AIC{G}'],self.df[f'BIC{G}'],self.df[f'AICc{G}'] = compute_aic_bic_aicc(log_l_max, npars, len(gmodel.x))
         
             del full_log_probs, flat_deconstr
             gc.collect()       
@@ -207,7 +210,7 @@ class EvaluationMixin:
         conditions = {
             # 'F32<F31': F32<F31,
             # 'F32<F33': F32<F33,
-            # 'F31+F32<F33': F31+F32<F33,
+            'F31+F32<F33': F31+F32<F33,
             # 'A32<A33': A32<A33,
             # 'F<0': np.any(np.array([F31,F32,F33])<0),
             

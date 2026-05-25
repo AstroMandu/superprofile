@@ -19,7 +19,7 @@ import pandas as pd
 from scipy.optimize import minimize
 
 from ..gmodel import Gmodel, map_params
-from ..subroutines import gauss, idx
+from ..subroutines import gauss, idx, compute_aic_bic_aicc
 
 
 class FittingMixin:
@@ -86,11 +86,29 @@ class FittingMixin:
 
         df_limited = self.df_stacked.loc[self.df_stacked["x"].between(xi, xf)].reset_index(drop=True)
         self.df_stacked = df_limited
+        
+
 
         # keep arrays and metadata in sync
         self.x   = np.ascontiguousarray(  self.df_stacked["x"].to_numpy(dtype=float, copy=False))
         self.y   = np.ascontiguousarray(  self.df_stacked["y"].to_numpy(dtype=float, copy=False))
         self.e_y = np.ascontiguousarray(self.df_stacked["e_y"].to_numpy(dtype=float, copy=False))
+        
+        # def mask_zero_channel() -> None:
+        #     idx_zero = int(np.argmin(np.abs(self.x)))
+        #     self.x   = np.delete(self.x, idx_zero)
+        #     self.y   = np.delete(self.y, idx_zero)
+        #     self.e_y = np.delete(self.e_y, idx_zero)
+            
+        def mask_zero_channel() -> None:
+            idx_zero = int(np.argmin(np.abs(self.x)))
+            # indices = [i for i in range(idx_zero - 1, idx_zero + 2) if 0 <= i < len(self.x)]
+            indices = [idx_zero-1,idx_zero+1]
+            self.x   = np.delete(self.x,   indices)
+            self.y   = np.delete(self.y,   indices)
+            self.e_y = np.delete(self.e_y, indices)
+
+        # mask_zero_channel()
 
         self.xmin, self.xmax = map(float, (np.nanmin(self.x), np.nanmax(self.x)))
         self.ymin, self.ymax = map(float, (np.nanmin(self.y), np.nanmax(self.y)))
@@ -189,6 +207,7 @@ class FittingMixin:
         
         self.BB = np.min([BB,B1])
         self.df['BB'] = self.BB
+        self.df['B1'] = self.BB
         return BB
 
     # -----------------------------
@@ -232,6 +251,8 @@ class FittingMixin:
         
         F1,A1,V1,S1,B1,N1 = self.df.loc[0,['F1','A1','V1','S1','B1','N1']]
         
+        # self.dispmin = 0.8*S1
+        
         # Fmax = F1 * 1.5
         dict_bound = {
             "F21": [0, F1*1.5],
@@ -253,6 +274,20 @@ class FittingMixin:
         dict_guess['V22'] = preguess['V22'] if 'V22' in preguess and preguess['V22'] is not None else V1
         dict_guess['B2']  = preguess['B2']  if 'B2'  in preguess and preguess['B2']  is not None else B1
         
+        #3
+        dict_guess['F21'],dict_guess['F22'] = np.array([0.5,0.5])*F1
+        # dict_guess['A21'],dict_guess['A22'] = np.array([0.5,0.5])*A1
+        dict_guess['S21'],dict_guess['S22'] = np.array([0.5,1.5])*S1
+        
+        if 'F21/F1' in preguess and preguess['F21/F1'] is not None: dict_guess['F21'] = preguess['F21/F1']*F1
+        if 'F22/F1' in preguess and preguess['F22/F1'] is not None: dict_guess['F22'] = preguess['F22/F1']*F1
+        if 'S21'    in preguess and preguess['S21']    is not None: dict_guess['S21'] = preguess['S21']
+        if 'S22'    in preguess and preguess['S22']    is not None: dict_guess['S22'] = preguess['S22']
+
+        used_guesses = [k for k, v in preguess.items() if v is not None]
+        if len(used_guesses)>0:
+            print(f"{self.header_printmsg} User-supplied guesses are used for {used_guesses}")
+        
         # # 1
         # dict_guess['F21'],dict_guess['F22'] = np.array([1,0])*F1
         # dict_guess['S21'],dict_guess['S22'] = np.array([1.1,1e10])*S1
@@ -261,10 +296,10 @@ class FittingMixin:
         # dict_guess['F21'],dict_guess['F22'] = np.array([0,1])*F1
         # dict_guess['S21'],dict_guess['S22'] = np.array([self.dispmin+0.1,1.1*S1])
         
-        #3
-        dict_guess['F21'],dict_guess['F22'] = np.array([0.5,0.5])*F1
-        # dict_guess['A21'],dict_guess['A22'] = np.array([0.5,0.5])*A1
-        dict_guess['S21'],dict_guess['S22'] = np.array([0.5,1.5])*S1
+        # #3
+        # dict_guess['F21'],dict_guess['F22'] = np.array([0.5,0.5])*F1
+        # # dict_guess['A21'],dict_guess['A22'] = np.array([0.5,0.5])*A1
+        # dict_guess['S21'],dict_guess['S22'] = np.array([0.5,1.5])*S1
 
         # used_guesses = [k for k, v in preguess.items() if v is not None]
         # if len(used_guesses)>0:
@@ -308,9 +343,13 @@ class FittingMixin:
             # "F32": [      0, Fmax],
             # "F33": [-0.1*F1, Fmax],
             
-            "F31": [-F1*0.1, F1*1.5],
-            "F32": [0.1*F1, F1*1.5],
-            "F33": [0, F1*1.5],
+            # "F31": [-F1*0.1, F1*1.5],
+            # "F32": [0.1*F1, F1*1.5],
+            # "F33": [0, F1*1.5],
+            
+            "F31": [-0.01*F1, F1*1.5],
+            "F32": [0, F1*1.5],
+            "F33": [-0.01*F1, F1*1.5],
             
             # 'A31': [0, 1.5*A1],
             # 'A32': [0, 1.5*A1],
@@ -328,9 +367,9 @@ class FittingMixin:
             # # 'S32': np.float64([0.8*S1, 1.2*S1]),
             # 'S33': [self.dispmin, self.dispmax],
             
-            'S31': [self.dispmin, S1],
+            'S31': [1e-2, S1],
             # 'S32': [0.5*S1,   1.5*S1],
-            'S32': [1e-5, self.dispmax],
+            'S32': [self.dispmin, self.dispmax],
             'S33': [S1, self.dispmax],
             
             "B3" : [-5*N1,+5*N1],
@@ -507,6 +546,20 @@ class FittingMixin:
                 for g in range(1,G+1):
                     Ag = self.df.loc[0,f'A{G}{g}']
                     self.df[f'SNR{G}{g}'] = Ag / NN
+                    
+            # AIC / BIC / AICc
+            n = len(self.y)
+            k = len(gmodel.names_param)
+            residuals_fit = self.get_residuals(G=G)
+            sigma_res = np.nanstd(residuals_fit)
+            sigma_eff = np.maximum(self.e_y, sigma_res)
+            # logl_max  = -0.5 * np.sum((residuals_fit / sigma_eff)**2 + np.log(2*np.pi*sigma_eff**2))
+            logl_max = -0.5 * np.sum((residuals_fit / self.e_y)**2 + np.log(2*np.pi*self.e_y**2))
+            
+            aic, bic, aicc = compute_aic_bic_aicc(logl_max, k, n)
+            self.df[f'AIC{G}']  = aic
+            self.df[f'BIC{G}']  = bic
+            self.df[f'AICc{G}'] = aicc
         
         return res_demapped
 
@@ -547,115 +600,66 @@ class FittingMixin:
         self.gmodel, self.guess = gmodel, guess
         
         ndim     = len(guess)
-        nwalkers = 10 * ndim
+        nwalkers = 12 * ndim
         
         if makefit_guess:
             guess = self.makefit_minimize(G,guess=guess,save_df=True)
             self.make_atlas(gmodel=gmodel)
             
-        # if G==2 and not self.dict_preguess:
+        if G==2 and not self.dict_preguess:
+            F1,V1,S1,B1 = self.df.loc[0,['F1','V1','S1','B1']]
+            guess1 = [F1, 0, V1, S1, 3*S1]
+            # guess2 = [0, F1, V1, 0.5*S1, 1.1*S1]
+            # guess3 = [0.5*F1, 0.5*F1, V1, S1-0.1, S1+0.1]
             
-        #     A1 = self.df.loc[0,'A1']
-        #     V1 = self.df.loc[0,'V1']
-        #     S1 = self.df.loc[0,'S1']
-        #     # with negligible wing comp
-        #     guess1 = np.float64([0.0, A1, V1, 0, S1])
-        #     guess2 = np.float64([ A1,0.0, V1, S1, S1*1.5])
+            # guess1 = []
             
-        #     spns = gmodel._spn
+            guess1 = map_params(guess1, gmodel, mode='x->u')
+            # guess2 = map_params(guess2, gmodel, mode='x->u')
+            # guess3 = map_params(guess3, gmodel, mode='x->u')
             
-        #     guess1 = clip_guess(map_params_physical_to_unconstr(guess1, gmodel), gmodel)
-        #     guess2 = clip_guess(map_params_physical_to_unconstr(guess2, gmodel), gmodel)
+            # pos1 = guess1 + 0.01*np.random.randn(nwalkers//3, ndim)
+            # pos2 = guess2 + 0.01*np.random.randn(nwalkers//3, ndim)
+            # pos3 = guess3 + 0.01*np.random.randn(nwalkers//3, ndim)
             
-        #     pos1 = guess1 + 0.01*spns * np.random.randn(nwalkers//2, ndim)
-        #     pos2 = guess2 + 0.01*spns * np.random.randn(nwalkers//2, ndim)
-        #     pos = np.vstack([pos1,pos2])
+            pos1 = guess1 + 0.01*np.random.randn(nwalkers, ndim)
+            # pos3 = guess3 + 0.01*np.random.randn(nwalkers, ndim)
+            # pos = np.vstack([pos1,pos2,pos3])
+            # pos = np.vstack([pos1,pos3])
+            pos = np.float64(pos1)
             
-        # elif G==3 and not self.dict_preguess:
-           
-        #     A1 = self.df.loc[0,'A1']
-        #     V1 = self.df.loc[0,'V1']
-        #     S1 = self.df.loc[0,'S1']
-        #     B1 = self.df.loc[0,'B1']
-        #     # with negligible wing comp
-        #     guess1 = np.float64([0.3*A1, 0.6*A1, 0.1*A1, V1, 5, 10, 25])
-        #     guess2 = np.float64([0.3*A1, 0.7*A1, 0,      V1, 5, 10, 25])
-        #     # guess3 = np.float64([0.0*A1, 0.5*A1, 0.5*A1, V1, 5, 10, 25])
+        elif G==3 and not self.dict_preguess:
+            F1,V1,S1,B1 = self.df.loc[0,['F1','V1','S1','B1']]
+            guess1 = [   0.01,     F1,   0.01, V1, 0.5*S1, 1.0*S1, 5.*S1]
+            guess2 = [ 0.5*F1, 0.5*F1,   0.01, V1, 0.5*S1, 1.1*S1, 5.*S1]
+            # guess3 = [ 0.1*F1, 0.6*F1, 0.3*F1, V1, 0.5*S1, 1.0*S1, 2.0*S1]
             
-        #     spns = gmodel._spn
+            guess1 = map_params(guess1, gmodel, mode='x->u')
+            guess2 = map_params(guess2, gmodel, mode='x->u')
+            # guess3 = map_params(guess3, gmodel, mode='x->u')
             
-        #     # guess1 = clip_guess(map_params_physical_to_unconstr(guess1, gmodel), gmodel)
-        #     # guess2 = clip_guess(map_params_physical_to_unconstr(guess2, gmodel), gmodel)
-            
-        #     guess1 = map_params_physical_to_unconstr(guess1, gmodel)
-        #     guess2 = map_params_physical_to_unconstr(guess2, gmodel)
-
-        #     # guess3 = clip_guess(map_params_physical_to_unconstr(guess3, gmodel), gmodel)
-            
-        #     pos1 = guess1 + 0.01*1 * np.random.randn(nwalkers//2, ndim)
-        #     pos2 = guess2 + 0.01*1 * np.random.randn(nwalkers//2, ndim)
-        #     # pos3 = guess3 + 0.1*spns * np.random.randn(nwalkers//3, ndim)
-        #     pos = np.vstack([pos1,pos2])
+            pos1 = guess1 + 0.01*np.random.randn(nwalkers//2, ndim)
+            pos2 = guess2 + 0.01*np.random.randn(nwalkers//2, ndim)
+            # pos3 = guess3 + 0.01*np.random.randn(nwalkers//3, ndim)
+            pos = np.vstack([pos1,pos2])#,pos3])
+            pos = np.float64(pos)
         
-        # else:
-        #     guess_unconstr = map_params_physical_to_unconstr(guess, gmodel)
-            
-        #     if np.any(np.isnan(guess_unconstr)): 
-        #         for i, name in enumerate(gmodel.names_param):
-        #             bound = gmodel.dict_bound[name]
-        #             inoff = 'in' if bound[0]<guess[i]<bound[1] else 'off'
-        #             print(self.header_printmsg, name, bound, guess[i], inoff)
-        #         raise ValueError
-            
-        #     spns = gmodel._spn
-        #     guess = clip_guess(guess_unconstr, gmodel)
-            
-        #     pos = guess + 0.1*spns * np.random.randn(nwalkers, ndim)
-        #     # pos = np.clip(pos, -7.999, 7.999)
-            
-        # if G==3 and not self.dict_preguess:
-        #     F1 = self.df.loc[0,'F1']
-        #     V1 = self.df.loc[0,'V1']
-        #     S1 = self.df.loc[0,'S1']
-        #     B1 = self.df.loc[0,'B1']
-        #     # with negligible wing comp
-        #     guess1 = np.float64([0.3*F1, 0.5*F1, 0.2*F1, V1, 5, 10, 25])
-        #     guess2 = np.float64([0.4*F1, 0.6*F1, 0.1*F1, V1, 5, 10, 25])
-            
-        #     if 'B3' in gmodel.names_param:
-        #         guess1 = np.float64([0.3*F1, 0.5*F1, 0.2*F1, V1, 5, 10, 25, 0])
-        #         guess2 = np.float64([0.4*F1, 0.6*F1, 0.1*F1, V1, 5, 10, 25, 0])
-            
-        #     # guess3 = np.float64([0.0*A1, 0.5*A1, 0.5*A1, V1, 5, 10, 25])
-            
-            
-        #     # guess1 = clip_guess(map_params_physical_to_unconstr(guess1, gmodel), gmodel)
-        #     # guess2 = clip_guess(map_params_physical_to_unconstr(guess2, gmodel), gmodel)
-            
-        #     guess1 = map_params_physical_to_unconstr(guess1, gmodel)
-        #     guess2 = map_params_physical_to_unconstr(guess2, gmodel)
-
-        #     # guess3 = clip_guess(map_params_physical_to_unconstr(guess3, gmodel), gmodel)
-            
-        #     pos1 = guess1 + 0.1*1 * np.random.randn(nwalkers//2, ndim)
-        #     pos2 = guess2 + 0.1*1 * np.random.randn(nwalkers//2, ndim)
-        #     # pos3 = guess3 + 0.1*spns * np.random.randn(nwalkers//3, ndim)
-        #     pos = np.vstack([pos1,pos2])
-        # else:
+        else:
         
-        guess_unconstr = map_params(guess, gmodel, mode='x->u')
-    
-        if np.any(np.isnan(guess_unconstr)): 
-            for i, name in enumerate(gmodel.names_param):
-                bound = gmodel.dict_bound[name]
-                inoff = 'in' if bound[0]<guess[i]<bound[1] else 'off'
-                print(self.header_printmsg, name, bound, guess[i], inoff)
-            raise ValueError
+            guess_unconstr = map_params(guess, gmodel, mode='x->u')
         
-        # guess = np.clip(guess_unconstr, 0.01,0.99)
-        
-        # guess = clip_guess(guess_unconstr, gmodel)
-        pos = guess_unconstr + 0.01 * np.random.randn(nwalkers, ndim)
+            if np.any(np.isnan(guess_unconstr)): 
+                for i, name in enumerate(gmodel.names_param):
+                    bound = gmodel.dict_bound[name]
+                    inoff = 'in' if bound[0]<guess[i]<bound[1] else 'off'
+                    print(self.header_printmsg, name, bound, guess[i], inoff)
+                raise ValueError
+            
+            # guess = np.clip(guess_unconstr, 0.01,0.99)
+            
+            # guess = clip_guess(guess_unconstr, gmodel)
+            pos = guess_unconstr + 0.01 * np.random.randn(nwalkers, ndim)
+            
         pos = np.clip(pos, 0.001,0.999)
                 
         sampler = emcee.EnsembleSampler(
@@ -710,3 +714,4 @@ class FittingMixin:
         # sampler.reset()   # clears chain buffers
         del sampler
         gc.collect()
+

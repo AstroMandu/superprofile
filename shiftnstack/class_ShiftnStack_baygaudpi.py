@@ -1,8 +1,12 @@
 import glob
+import logging
 import os
 # from .class_Filter_genuine import Filter
 import warnings
+from collections import Counter
+from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import astropy.units as u
 import numpy as np
@@ -27,13 +31,17 @@ warnings.simplefilter("ignore", StokesWarning)
 
 class ShiftnStack:
     
-    def __init__(self, path_cube, path_classified, path_mask=None, bgsub=True, path_vf_secondary=None, correct_vf_secondary=False):
+    def __init__(self, path_cube, path_classified, path_mask=None, bgsub=True, path_vf_secondary=None, correct_vf_secondary=False, 
+                 secondary_mode:Literal['MOM','HER','HERMOM']='MOM'):
+        # secondary_mode: 'moment' -> path_vf_secondary is a FITS moment-1 map (existing behaviour)
+        #                 'hermite' -> path_vf_secondary is a hermite.npy; vf from [5] and disp from [2]
         path_cube       = Path(path_cube)
-        path_classified = Path(path_classified)
+        path_classified = Path(path_classified) if path_classified is not None else None
         
         self.path_cube = path_cube
         self.path_clfy = path_classified
         self.path_mask = path_mask
+        self.secondary_mode = secondary_mode
         
         self.name_cube = path_cube.parent.name
         
@@ -47,22 +55,47 @@ class ShiftnStack:
         self.hedr_cube = hedr_cube
         self.data_cube = data_cube 
         
+        _shape2d = (hedr_cube['NAXIS2'], hedr_cube['NAXIS1'])
+
+        hermite_vf_finite = None
         if path_vf_secondary is not None:
             path_vf_secondary = Path(path_vf_secondary)
-            data_vf_secondary = (fits.getdata(path_vf_secondary)*(u.m/u.s)).to(u.km/u.s).value
-            if len(data_vf_secondary.shape)>2: data_vf_secondary = data_vf_secondary[0,:,:]
-            data_vf_secondary = data_vf_secondary
-            
-            if correct_vf_secondary:
-                # radio velocity -> optical velocity
-                import astropy.constants as const
-                c = const.c.to('km/s').value
-                data_vf_secondary = c * (1 / (1 - data_vf_secondary / c) - 1)
+            if secondary_mode in ('HER', 'HERMOM'):
+                output_hermite = np.load(path_vf_secondary)
+                data_vf_secondary   = (output_hermite[5,:,:] * u.m/u.s).to(u.km/u.s).value
+                data_disp_secondary = (output_hermite[2,:,:] * u.m/u.s).to(u.km/u.s).value
+
+                if secondary_mode == 'HERMOM':
+                    hermite_vf_finite = np.isfinite(data_vf_secondary)  # before mom fill
+                    path_mom1 = self.path_cube.parent / 'cube_mom1.fits'
+                    path_mom2 = self.path_cube.parent / 'cube_mom2.fits'
+                    if path_mom1.exists():
+                        data_vf_mom = (fits.getdata(path_mom1) * (u.m/u.s)).to(u.km/u.s).value
+                        if data_vf_mom.ndim > 2: data_vf_mom = data_vf_mom[0]
+                        data_vf_secondary[~np.isfinite(data_vf_secondary)] = data_vf_mom[~np.isfinite(data_vf_secondary)]
+                    if path_mom2.exists():
+                        data_disp_mom = fits.getdata(path_mom2) / 1000.
+                        data_disp_secondary[~np.isfinite(data_disp_secondary)] = data_disp_mom[~np.isfinite(data_disp_secondary)]
+
+            elif secondary_mode == 'MOM':
+                data_vf_secondary = (fits.getdata(path_vf_secondary) * (u.m/u.s)).to(u.km/u.s).value
+                if data_vf_secondary.ndim > 2: data_vf_secondary = data_vf_secondary[0]
+                if correct_vf_secondary:
+                    import astropy.constants as const
+                    c = const.c.to('km/s').value
+                    data_vf_secondary = c * (1 / (1 - data_vf_secondary / c) - 1)
+                data_disp_secondary = None
+            else:
+                raise ValueError(f"Unknown secondary_mode: '{secondary_mode}'")
             
         else:
-            data_vf_secondary = np.full((hedr_cube['NAXIS2'],hedr_cube['NAXIS1']),np.nan)
-        self.data_vf_secondary = data_vf_secondary
-        
+            data_vf_secondary   = np.full(_shape2d, np.nan)
+            data_disp_secondary = None
+
+        self.data_vf_secondary   = data_vf_secondary
+        self.data_disp_secondary = data_disp_secondary
+        self._hermite_vf_finite  = hermite_vf_finite
+
         if(path_mask is not None):
             path_mask = Path(path_mask)
             data_mask = fits.getdata(path_mask)
@@ -84,20 +117,24 @@ class ShiftnStack:
         std_channel = mad_std(edge_channels, ignore_nan=True)
         self.std_channel = std_channel * u.Jy/u.beam
            
-        nopt = len(glob.glob(str(path_classified/"ngfit/*G*_*.0.fits")))
-        
-        map_ngau = fits.getdata(glob.glob(str(path_classified/"sgfit/*.7.fits"))[0])
-        # 
-        
-        self.len_nopt = int(np.nansum(map_ngau))
-        if bgsub:
-            map_bkgr = fits.getdata(glob.glob(str(path_classified/"ngfit/*_1.3.fits"))[0])#*(u.Jy/u.beam)
-            self.data_cube-= np.where(np.isfinite(map_bkgr),map_bkgr,0)
+        self.nopt     = 0
+        self.len_nopt = 0
+        if path_classified is not None and Path(path_classified).exists():
+            nopt = len(glob.glob(str(path_classified/"ngfit/*G*_*.0.fits")))
+            ngau_files = glob.glob(str(path_classified/"sgfit/*.7.fits"))
+            if ngau_files:
+                map_ngau = fits.getdata(ngau_files[0])
+                self.len_nopt = int(np.nansum(map_ngau))
+            if bgsub:
+                bkgr_files = glob.glob(str(path_classified/"ngfit/*_1.3.fits"))
+                if bkgr_files:
+                    map_bkgr = fits.getdata(bkgr_files[0])
+                    self.data_cube -= np.where(np.isfinite(map_bkgr), map_bkgr, 0)
+            self.nopt = nopt
         
         self.spec_axis = spec_axis
         self.chansep    = chansep
         self.abschansep = np.abs(chansep)
-        self.nopt = nopt
         
         beam = Beam.from_fits_header(hedr_cube)
         self.beam = beam
@@ -111,12 +148,94 @@ class ShiftnStack:
         self.pix_per_beam = self.area_beam/self.area_pixl
         
         self.dict_stacked = {}
-        
-        self.pbar = False
-        self.bgsub = bgsub
-        self.stat  = 'STBY'
+        self.map_stack_method = np.zeros(_shape2d, dtype=np.int8)  # 0=none,1=baygaud,2=hermite,3=moment
+
+        self.pbar   = False
+        self.bgsub  = bgsub
+        self.stat   = 'STBY'
+        self.suffix = ''
         self.path_temp = None
+
+        # Logging
+        self.logger = None
+        self._log_pixel_records = []  # list of (x, y, method_label, n_components)
         
+    # ------------------------------------------------------------------
+    # Logging helpers
+    # ------------------------------------------------------------------
+
+    def setup_logger(self, suffix: str = '', log_level: int = logging.INFO) -> None:
+        """Create log/<name_cube><suffix>_<timestamp>.log under the cube's parent directory.
+
+        Parameters
+        ----------
+        suffix : str
+            Run suffix (e.g. '_I0.5r25'). Stored on self so writestat can use it.
+        log_level : int
+            Logging level for the file handler. Use logging.DEBUG to get
+            per-pixel lines; logging.INFO (default) skips them with no
+            formatting overhead.
+        """
+        self.suffix = suffix
+        self._log_pixel_records = []
+
+        log_dir = self.path_cube.parent / 'log'
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        log_name  = f"{self.name_cube}{suffix}_{timestamp}.log"
+        log_path  = log_dir / log_name
+
+        logger = logging.getLogger(f"sns.{self.name_cube}{suffix}.{timestamp}")
+        logger.setLevel(logging.DEBUG)
+        logger.propagate = False
+        if logger.handlers:
+            logger.handlers.clear()
+
+        fh = logging.FileHandler(log_path, mode='w', encoding='utf-8')
+        fh.setLevel(log_level)
+        fh.setFormatter(logging.Formatter(
+            '%(asctime)s  %(levelname)-8s  %(message)s',
+            datefmt='%H:%M:%S',
+        ))
+        logger.addHandler(fh)
+        self.logger = logger
+
+        logger.info(f"cube        : {self.path_cube}")
+        logger.info(f"classified  : {self.path_clfy}")
+        logger.info(f"mask        : {self.path_mask}")
+        logger.info(f"secondary   : {self.secondary_mode}")
+        logger.info(f"bgsub       : {self.bgsub}")
+        logger.info(f"std_channel : {self.std_channel:.4e}")
+        logger.info("-" * 60)
+
+    def log_summary(self) -> None:
+        """Write a pixel-count / percentage summary to the logger.
+        Call this after run().
+        """
+        if self.logger is None:
+            return
+
+        counts = Counter(rec[2] for rec in self._log_pixel_records)
+        total  = sum(counts.values())
+
+        self.logger.info("-" * 60)
+        self.logger.info("STACKING SUMMARY")
+        self.logger.info(f"  total pixels stacked : {total}")
+        for method in ('baygaud', 'hermite', 'moment'):
+            n   = counts.get(method, 0)
+            pct = n / total * 100 if total > 0 else 0.0
+            self.logger.info(f"  {method:<10}: {n:6d}  ({pct:5.1f}%)")
+        self.logger.info("-" * 60)
+
+        # Per-pixel table — only written if DEBUG is enabled
+        if self.logger.isEnabledFor(logging.DEBUG):
+            self.logger.debug("PIXEL LOG  (x, y, method, n_components)")
+            for x, y, method, n_comp in self._log_pixel_records:
+                self.logger.debug(f"  {x:4d}  {y:4d}  {method:<10}  {n_comp}")
+
+    # ------------------------------------------------------------------
+
     def writestat(self, message: str) -> None:
         if self.path_temp is None:
             return
@@ -182,26 +301,6 @@ class ShiftnStack:
         
         if mode == 'velocity':
             pass
-            # # Ensure we compare in km/s
-            # spec = np.asarray(self.spec_axis)  # already numeric (km/s) in your code
-            # def to_kms(x):
-            #     if x is None:
-            #         return None
-            #     return x.to(u.km/u.s).value if hasattr(x, 'to') else float(x)
-
-            # low_v  = to_kms(low)
-            # high_v = to_kms(high)
-
-            # if low_v is None and high_v is None:
-            #     mask = np.zeros_like(spec, dtype=bool)  # nothing to mask
-            # elif low_v is None:
-            #     mask = spec < high_v
-            # elif high_v is None:
-            #     mask = spec > low_v
-            # else:
-            #     if high_v < low_v:  # tolerate swapped inputs
-            #         low_v, high_v = high_v, low_v
-            #     mask = (spec > low_v) & (spec < high_v)
 
         elif mode == 'channel':
             chans = np.arange(n_spec)
@@ -237,343 +336,292 @@ class ShiftnStack:
             return False
     
     def run(self, stack_secondary=False):
-        
-        # def argfind_nearest(array, value):
-        #     idx = np.searchsorted(array, value)
-        #     if idx > 0 and (idx == len(array) or abs(value - array[idx-1]) < abs(value - array[idx])):
-        #         return idx-1
-        #     else:
-        #         return idx
-       
+ 
         data_cube = np.float64(self.data_cube.copy())
-        dict_data = read_ngfits(self.path_clfy/'ngfit',
-                                toreads=['flux','velo','disp','psnr','bkgr','nois','e_disp'], 
-                                path_mask=self.path_mask,
-                                wo_unit=True)
-        
+        data_mask = self.data_mask.copy()
+ 
+        # ROLL ---------------------------------------------------
+        len_specaxis = len(self.spec_axis)
+        xx = np.arange(len_specaxis) - int((len_specaxis - 1) / 2)
+        if self.chansep < 0:
+            xx = xx[::-1]
+        lenx = len(xx)
+        shifter = shifter_gipsy
+        # --------------------------------------------------------
+ 
+        yy  = np.zeros_like(xx, dtype=np.float64)
+        e_y = np.zeros_like(xx, dtype=np.float64)
+        NN  = np.zeros_like(xx)
+ 
+        sa_div_chan    = self.spec_axis / self.chansep
+        index_centr    = np.argwhere(xx == 0).item()
+        std_channel    = self.std_channel
+        index_dict_stacked = 0
+ 
+        clfy_available = self.path_clfy is not None and Path(self.path_clfy).exists()
+ 
+        if clfy_available:
+            index_dict_stacked = self._stack_baygaud(
+                data_cube, data_mask, xx, yy, NN,
+                shifter, index_centr, index_dict_stacked,
+            )
+ 
+        if stack_secondary:
+            self._stack_secondary(
+                data_cube, data_mask, xx, yy, NN,
+                shifter, index_centr, index_dict_stacked,
+            )
+ 
+        # ---- finalise ------------------------------------------
+        yy  = yy  * (u.Jy / u.beam)
+        e_y = e_y * (u.Jy / u.beam)
+ 
+        yy  =          yy.to(u.Jy / u.sr, equivalencies=u.beam_angular_area(self.beam)) * self.area_pixl
+        e_y = std_channel.to(u.Jy / u.sr, equivalencies=u.beam_angular_area(self.beam)) * self.area_pixl * np.sqrt(NN / self.pix_per_beam)
+        e_y[np.argwhere(e_y == 0)] = np.median(e_y)
+ 
+        xx, yy, e_y = xx * np.abs(self.chansep), yy, e_y
+ 
+        df = pd.DataFrame()
+        df['x']   = xx
+        df['y']   = yy.value
+        df['e_y'] = e_y.value
+        df['N']   = NN
+ 
+        pixels_in_beam = self.beam.sr / (self.cd * self.cd).to(u.sr)
+        df = df.loc[df['N'] > pixels_in_beam].reset_index(drop=True)
+ 
+        self.xx  = df['x']
+        self.yy  = df['y']
+        self.e_y = df['e_y']
+        self.df_stacked = df
+ 
+    # ------------------------------------------------------------------
+    def _stack_baygaud(
+        self, data_cube, data_mask, xx, yy, NN,
+        shifter, index_centr, index_dict_stacked,
+    ):
+        """Shift-and-stack pixels that have baygaud NGfit solutions."""
+ 
+        dict_data = read_ngfits(
+            self.path_clfy / 'ngfit',
+            toreads=['flux', 'velo', 'disp', 'psnr', 'bkgr', 'nois', 'e_disp'],
+            path_mask=self.path_mask,
+            wo_unit=True,
+        )
+ 
         if self.bgsub:
             for coord in dict_data.keys():
                 for g in dict_data[coord].keys():
                     dict_data[coord][g]['bkgr'] = 0.
-        
-        data_mask = self.data_mask.copy()
-        data_vf_secondary = self.data_vf_secondary
-        
+ 
         for coord in dict_data.keys():
             for g in dict_data[coord].keys():
-                
-                if 'psnr' not in dict_data[coord][g]: continue
-            
+                if 'psnr' not in dict_data[coord][g]:
+                    continue
                 psnr = dict_data[coord][g]['psnr']
                 nois = dict_data[coord][g]['nois']
                 bkgr = dict_data[coord][g]['bkgr']
-                ampl = (psnr * nois) + bkgr
-                # ampl = (psnr * nois)
-                
-                dict_data[coord][g]['ampl'] = ampl
-        
-        # ROLL ---------------------------------------------------
-        len_specaxis = len(self.spec_axis)
-        xx = np.arange(len_specaxis) - int((len_specaxis - 1)/2)
-        if self.chansep < 0:
-            xx = xx[::-1]
-        lenx = len(xx)
-        # shifter = shifter_roll
-        shifter = shifter_gipsy
-        # --------------------------------------------------------
-        
-        # CUT ----------------------------------------------------
-        # len_specaxis = len(self.spec_axis)
-        # if self.chansep<0:
-        #     xx = np.arange(len_specaxis-1, -len_specaxis, -1)
-        # else:
-        #     xx  = np.arange(-len_specaxis+1, len_specaxis, 1)
-        # lenx = len(xx)
-        # --------------------------------------------------------
-            
-        yy  = np.zeros_like(xx, dtype=np.float64)#*(u.Jy/u.beam)
-        e_y = np.zeros_like(xx, dtype=np.float64)#*(u.Jy/u.beam)
-        NN  = np.zeros_like(xx)
-        
-        sa_div_chan = self.spec_axis / self.chansep
-        index_centr = np.argwhere(xx==0).item()
-        
-        std_channel = self.std_channel
-            
-        # data_cube[np.isnan(data_cube)] = np.random.normal(0,std_channel.value)#*data_cube.unit
-    
-        # from tqdm import tqdm
-        # for coord in tqdm(dict_data.keys()):
-        
-        len_data = len(dict_data)
-                
-        if self.pbar: pbar = tqdm(total=len_data)
-        index_dict_stacked = 0
-        count = 0
+                dict_data[coord][g]['ampl'] = (psnr * nois) + bkgr
+ 
+        len_data     = len(dict_data)
+        count        = 0
         last_reported = -1
-        
-        self.stat = 'STAKB'
+        self.stat    = 'STAKB'
+ 
+        if self.pbar:
+            pbar = tqdm(total=len_data)
+ 
         for coord in dict_data.keys():
-            x,y = map(int, coord.split(','))
+            x, y = map(int, coord.split(','))
             dict_cord = dict_data[coord]
-            
-            data_mask[y,x] = np.nan
-            
+ 
+            data_mask[y, x] = np.nan
+            self.map_stack_method[y, x] = 1
+ 
             all_models = {
                 g: gauss(self.spec_axis, d['ampl'], d['velo'], d['disp'])
                 for g, d in dict_cord.items()
                 if 'velo' in d
             }
             model_sum = sum(all_models.values()) if all_models else 0.0
-            
+ 
             for g in dict_cord:
-                if 'velo' not in dict_cord[g]: continue
-                
-                dict_pg = dict_cord[g]
-                
-                data_subed  = data_cube[:,y,x].copy()
+                if 'velo' not in dict_cord[g]:
+                    continue
+ 
+                dict_pg    = dict_cord[g]
+                data_subed = data_cube[:, y, x].copy()
                 data_subed -= (model_sum - all_models[g])
                 data_subed -= dict_pg['bkgr']
-
-                # shift = dict_pg['velo']/self.chansep
-                # index = argfind_nearest(sa_div_chan, shift)
-
-                # mod = index_centr - index
-                # shifted = shifter(data_subed, mod, lenx)
-                # yy += shifted
-                # NN += (shifted != 0).astype(np.uint8)
-                
+ 
                 shifted, valid = shifter(
-                    data_subed,          # spectrum
-                    self.spec_axis,      # world coord per channel (km/s optical in your pipeline)
-                    dict_pg['velo'],     # center velocity
-                    xx*self.abschansep,                  # your offset bins in channel units
-                    fill=0.0,            # keep 0 outside range to match your current NN logic style
-                    index_centr = index_centr
+                    data_subed,
+                    self.spec_axis,
+                    dict_pg['velo'],
+                    xx * self.abschansep,
+                    fill=0.0,
+                    index_centr=index_centr,
                 )
-
+ 
                 yy += shifted
                 NN += valid.astype(np.uint8)
-                                
-                # self.dict_stacked[count] = {'disp':dict_pg['disp'], 'e_disp':dict_pg['e_disp']}
+ 
                 self.dict_stacked[index_dict_stacked] = {
-                    'NHI':self._mom0_to_NHI(dict_pg['flux'])*1000,
-                    'disp':dict_pg['disp'], 'e_disp':dict_pg['e_disp']}
-                index_dict_stacked+=1
-                
-                # if mod<0: 
-                #     showplot=True
-                    
-                # if showplot:
-                #     import pylab as plt
-                #     fig, axs = plt.subplots(nrows=4)
-                #     plt.rcParams['hatch.linewidth']=4
-                #     ax=axs[0]
-                #     ax.axhline(0,color='gray',alpha=0.5)
-                #     ax.step(self.spec_axis, data_cube[:,y,x],color='gray',where='mid')
-                #     ax.fill_between(self.spec_axis, data_cube[:,y,x], step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
+                    'NHI':    self._mom0_to_NHI(dict_pg['flux']) * 1000,
+                    'disp':   dict_pg['disp'],
+                    'e_disp': dict_pg['e_disp'],
+                }
 
-                #     fig.suptitle("({}, {}), Nopt={}".format(x, y, len(dict_cord)))
-                #     ax.set_xlabel(r"Velocity [km $s^{-1}]$", color='white', fontsize=20, labelpad=-3)
-                #     ax.set_ylabel(r"Intensity [mJy/beam]",   color='white', fontsize=20)
-                    
-                #     xs = np.linspace(self.spec_axis.min(),self.spec_axis.max(),100)
-                    
-                #     model_tot = np.zeros_like(xs)
-                #     for gother in dict_cord.keys():
-                #         if(g==gother): 
-                #             model = gauss(xs, dict_pg['ampl'], dict_pg['velo'], dict_pg['disp'])#+dict_pg['bkgr']
-                #             ax.plot(xs,model,color='tab:blue')
-                #             model_tot+=model#-dict_pg['bkgr']
-                #             continue
-                #         dict_pgother = dict_cord[gother]
-                #         model = gauss(xs, dict_pgother['ampl'], dict_pgother['velo'], dict_pgother['disp'])#+dict_pg['bkgr']
-                #         ax.plot(xs,model,color='gray')
-                #         model_tot+=model
-                #     ax.plot(xs,model_tot, color='black',alpha=0.5)
-                    
-                #     ax=axs[1]
-                #     ax.axhline(0,color='gray',alpha=0.5)
-                #     ax.step(        self.spec_axis, data_subed,color='gray',where='mid')
-                #     ax.fill_between(self.spec_axis, data_subed, step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
-                #     ax.set_ylim(axs[0].get_ylim())
+                if self.logger and self.logger.isEnabledFor(logging.DEBUG):
+                    self.logger.debug(
+                        f"baygaud  ({x:4d},{y:4d})  g={g}  "
+                        f"velo={dict_pg['velo']:8.2f} km/s  "
+                        f"disp={dict_pg['disp']:6.2f} km/s  "
+                        f"flux={dict_pg['flux']:.3e}"
+                    )
 
-                #     fig.suptitle("({}, {}), Nopt={}".format(x, y, len(dict_cord)))
-                #     ax.set_xlabel(r"Velocity [km $s^{-1}]$", color='white', fontsize=20, labelpad=-3)
-                #     ax.set_ylabel(r"Intensity [mJy/beam]",   color='white', fontsize=20)
-                    
-                    
-                #     ax=axs[2]
-                #     ax.axhline(0,color='gray',alpha=0.5)
-                #     ax.step(        xx*np.abs(self.chansep), shifted, where='mid', color='gray')
-                #     ax.fill_between(xx*np.abs(self.chansep), shifted, step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
-                #     ax.set_ylim(axs[0].get_ylim())
-                    
-                #     ax=axs[3]
-                #     ax.axhline(0,color='gray',alpha=0.5)
-                #     ax.step(        xx*np.abs(self.chansep), yy, where='mid', color='gray')
-                #     ax.fill_between(xx*np.abs(self.chansep), yy, step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
-                    
-                #     plt.savefig(f'/home/mskim/workspace/research/temp/{count}.png')
-                #     # plt.close(fig)
-                    
-            if self.pbar: pbar.update(1)
-            count+=1
-            prog_perc = count/len_data*100
+                index_dict_stacked += 1
+
+            # Record pixel after processing all components
+            n_comp = len([g for g in dict_cord if 'velo' in dict_cord[g]])
+            self._log_pixel_records.append((x, y, 'baygaud', n_comp))
+
+            if self.pbar:
+                pbar.update(1)
+            count += 1
+            prog_perc = count / len_data * 100
+            if prog_perc // 10 > last_reported:
+                last_reported = prog_perc // 10
+                self.writestat(f"{self.stat} {prog_perc:.0f}% .")
+ 
+        return index_dict_stacked
+ 
+    # ------------------------------------------------------------------
+    def _stack_secondary(
+        self, data_cube, data_mask, xx, yy, NN,
+        shifter, index_centr, index_dict_stacked,
+    ):
+        """Shift-and-stack pixels using the secondary velocity field
+        (moment-1 or Hermite) for pixels not already consumed by baygaud."""
+ 
+        path_mom0    = self.path_cube.parent / 'cube_mom0.fits'
+        data_mom0    = fits.getdata(path_mom0) if path_mom0.exists() else None
+ 
+        if self.secondary_mode in ('HER', 'HERMOM'):
+            data_disp_sec = self.data_disp_secondary.copy()
+            stat_label    = 'STAKHE'
+        else:
+            mom2_path = self.path_cube.parent / 'cube_mom2.fits'
+            data_disp_sec = fits.getdata(mom2_path) / 1000. if mom2_path.exists() else None
+            stat_label    = 'STAKM'
+ 
+        data_vf_secondary = self.data_vf_secondary.copy()
+        if data_disp_sec is not None:
+            data_vf_secondary = np.where(
+                (~np.isfinite(data_disp_sec)) | (data_disp_sec < self.chansep / 2.355 * 2),
+                np.nan,
+                data_vf_secondary,
+            )
+ 
+        valid_pixels = np.argwhere(
+            np.isfinite(data_mask) & np.isfinite(data_vf_secondary)
+        )
+        len_data      = len(valid_pixels)
+        count         = 0
+        last_reported = -1
+        self.stat     = stat_label
+
+        if self.logger:
+            self.logger.info(f"secondary mode : {self.secondary_mode}  ({len_data} pixels)")
+ 
+        for y, x in valid_pixels:
+ 
+            shifted, valid = shifter(
+                data_cube[:, y, x],
+                self.spec_axis,
+                data_vf_secondary[y, x],
+                xx * self.abschansep,
+                fill=0.0,
+                index_centr=index_centr,
+            )
+            yy += shifted
+            NN += valid.astype(np.uint8)
+ 
+            if self.secondary_mode == 'HER':
+                method_code = 2
+            elif self.secondary_mode == 'HERMOM':
+                method_code = 2 if self._hermite_vf_finite[y, x] else 3
+            else:
+                method_code = 3
+            self.map_stack_method[y, x] = method_code
+
+            method_label = {1: 'baygaud', 2: 'hermite', 3: 'moment'}[method_code]
+            self._log_pixel_records.append((x, y, method_label, 1))
+
+            if self.logger and self.logger.isEnabledFor(logging.DEBUG):
+                self.logger.debug(
+                    f"{method_label:<8} ({x:4d},{y:4d})  "
+                    f"vf={data_vf_secondary[y, x]:8.2f} km/s"
+                )
+ 
+            if data_disp_sec is not None:
+                disp_val = data_disp_sec[y, x]
+                if not np.isfinite(disp_val):
+                    continue
+                nhi = self._mom0_to_NHI(data_mom0[y, x]) if data_mom0 is not None else 0.0
+                self.dict_stacked[index_dict_stacked] = {
+                    'NHI':    nhi,
+                    'disp':   disp_val,
+                    'e_disp': 0.0,
+                }
+                index_dict_stacked += 1
+ 
+            count += 1
+            prog_perc = count / len_data * 100 if len_data > 0 else 100
             if prog_perc // 10 > last_reported:
                 last_reported = prog_perc // 10
                 self.writestat(f"{self.stat} {prog_perc:.0f}% .")
         
-        if stack_secondary:
-            
-            if os.path.exists(self.path_cube.parent/'cube_mom2.fits'):
-                data_mom0 = fits.getdata(self.path_cube.parent/'cube_mom0.fits')
-                data_mom2 = fits.getdata(self.path_cube.parent/'cube_mom2.fits')/1000.
-            else: data_mom2 = None
-            
-            data_vf_secondary = np.where(data_mom2<self.chansep/2.355*2, np.nan, data_vf_secondary)
-            
-            count_plot = 0
-            count = 0
-            last_reported = -1
-            len_data = len(np.argwhere((np.isfinite(data_mask)) & (np.isfinite(data_vf_secondary))))
-            self.stat = 'STAKM'
-            for y,x in np.argwhere((np.isfinite(data_mask)) & (np.isfinite(data_vf_secondary))):
-                # shift = data_vf_secondary[y,x]/self.chansep
-                # index = argfind_nearest(sa_div_chan, shift)
-                # mod = index_centr - index
-                # shifted = shifter(data_cube[:,y,x], mod, lenx)
-                # yy  += shifted
-                # NN  += (shifted != 0).astype(np.uint8)
-                
-                shifted, valid = shifter(
-                    data_cube[:,y,x],          # spectrum
-                    self.spec_axis,      # world coord per channel (km/s optical in your pipeline)
-                    data_vf_secondary[y,x],     # center velocity
-                    xx*self.abschansep,                  # your offset bins in channel units
-                    fill=0.0,            # keep 0 outside range to match your current NN logic style
-                    index_centr = index_centr
-                )
-                yy += shifted
-                NN += valid.astype(np.uint8)
-                
-                if data_mom2 is not None:
-                    self.dict_stacked[index_dict_stacked] = {
-                        'NHI' :self._mom0_to_NHI(data_mom0[y,x]),
-                        'disp':data_mom2[y,x], 'e_disp':0.0}
-                    index_dict_stacked+=1
-                    
-                count+=1
-                                    
-                # ############## PLOTTING    
-                # indices_wosignal = np.argwhere((self.spec_axis<data_vf_secondary[y,x]-3*data_mom2[y,x]) | (self.spec_axis>data_vf_secondary[y,x]+3*data_mom2[y,x]))
-                # rms  = np.nanstd(data_cube[:,y,x][indices_wosignal])
-                # peak = np.nanmax(data_cube[:,y,x])
-                
-                # if peak/rms<5: continue
-                # count_plot+=5               
-                # # if count_plot%100: continue                
-                
-                
-                # print(peak, rms, peak/rms)
-                    
-                # import pylab as plt
-                # import matplotlib
-                # matplotlib.use('TkAgg')
-                
-                # fig, axs = plt.subplots(nrows=3)
-                # plt.rcParams['hatch.linewidth']=4
-                # ax=axs[0]
-                # ax.axhline(0,color='gray',alpha=0.5)
-                # print(data_cube[:,y,x])
-                
-                # ax.step(self.spec_axis, data_cube[:,y,x],color='gray',where='mid')
-                # ax.fill_between(self.spec_axis, data_cube[:,y,x], step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
-                # ax.axvline(data_vf_secondary[y,x])
-                # ax.axvspan(data_vf_secondary[y,x]-3*data_mom2[y,x],data_vf_secondary[y,x]+3*data_mom2[y,x], color='gray',alpha=0.1)
-
-                # fig.suptitle("({}, {})".format(x, y))
-                # ax.set_xlabel(r"Velocity [km $s^{-1}]$", color='white', fontsize=20, labelpad=-3)
-                # ax.set_ylabel(r"Intensity [mJy/beam]",   color='white', fontsize=20)
-                
-                # xs = np.linspace(self.spec_axis.min(),self.spec_axis.max(),100)
-                
-                # ax=axs[1]
-                # ax.axhline(0,color='gray',alpha=0.5)
-                # ax.step(        xx*np.abs(self.chansep), shifted, where='mid', color='gray')
-                # ax.fill_between(xx*np.abs(self.chansep), shifted, step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
-                # ax.set_ylim(axs[0].get_ylim())
-                
-                # ax=axs[2]
-                # ax.axhline(0,color='gray',alpha=0.5)
-                # ax.step(        xx*np.abs(self.chansep), yy, where='mid', color='gray')
-                # ax.fill_between(xx*np.abs(self.chansep), yy, step='mid', hatch=r"//", color='lightgrey', edgecolor='white')
-                
-                # plt.show()
-                # plt.close(fig)
-        
-                # import pylab as plt
-                prog_perc = count/len_data*100
-                if prog_perc // 10 > last_reported:
-                    last_reported = prog_perc // 10
-                    self.writestat(f"{self.stat} {prog_perc:.0f}% .")
-        
-        # import pylab as plt
-        # fig,axs=plt.subplots(ncols=3, sharex=True, sharey=True)
-        # ax = axs[0]
-        # ax.imshow(self.data_mask, interpolation='none')
-        # ax = axs[1]
-        # ax.imshow(data_mask, interpolation='none')
-        # ax = axs[2]
-        # ax.imshow(map_stacked, interpolation='none')
-        # # plt.savefig('/home/mskim/workspace/research/data/test/tmp.png', dpi=200)
-        # ax.invert_yaxis()
-        # plt.show()
-        # raise
-        
-        yy  =  yy * (u.Jy/u.beam)
-        e_y = e_y * (u.Jy/u.beam)
-        
-        yy  =          yy.to(u.Jy/u.sr, equivalencies=u.beam_angular_area(self.beam)) * self.area_pixl
-        e_y = std_channel.to(u.Jy/u.sr, equivalencies=u.beam_angular_area(self.beam)) * self.area_pixl * np.sqrt(NN / self.pix_per_beam)
-        e_y[np.argwhere(e_y==0)] = np.median(e_y)
-
-        xx,yy,e_y = xx*np.abs(self.chansep), yy, e_y
-        
-        df = pd.DataFrame()
-        df['x']   = xx#.value
-        df['y']   = yy.value
-        df['e_y'] = e_y.value
-        df['N']   = NN
-        
-        # df['y'] / df['y']#/df['N']
-        
-        pixels_in_beam = self.beam.sr / (self.cd*self.cd).to(u.sr)
-        # print(pixels_in_beam)
-        df = df.loc[df['N']>pixels_in_beam].reset_index(drop=True)
-        
-        # df = df.loc[df['N']>np.max(df['N'])*0.50].reset_index(drop=True)
-        # df = df.loc[df['N']==np.max(df['N'])].reset_index(drop=True)
-
-        self.xx  = df['x']
-        self.yy  = df['y']
-        self.e_y = df['e_y']
-    
-        self.df_stacked = df
-        # self.list_disps = self.list_disps
-        
     def save_df_stacked(self, path_to_save):
         self.df_stacked.to_string(path_to_save, index=False)
-        
-    # def save_list_disps(self, path_to_save):
-    #     np.save(path_to_save, self.list_disps)
-    
+
+    def plot_map_stack_method(self, ax=None, path_save=None):
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
+        import matplotlib.patches as mpatches
+
+        labels  = {1: 'baygaud', 2: 'hermite', 3: 'moment'}
+        colors  = {0: 'white',   1: '#4477AA', 2: '#EE6677', 3: '#228833'}
+        bounds  = [-0.5, 0.5, 1.5, 2.5, 3.5]
+        cmap    = mcolors.ListedColormap([colors[k] for k in range(4)])
+        norm    = mcolors.BoundaryNorm(bounds, cmap.N)
+
+        standalone = ax is None
+        if standalone:
+            fig, ax = plt.subplots(figsize=(6, 6))
+
+        m = self.map_stack_method.copy().astype(float)
+        m[m == 0] = np.nan
+        ax.imshow(m, origin='lower', cmap=cmap, norm=norm, interpolation='none')
+
+        patches = [mpatches.Patch(color=colors[k], label=labels[k]) for k in (1, 2, 3)]
+        ax.legend(handles=patches, loc='upper right', fontsize=8)
+        ax.set_title('Stacking method per pixel')
+        ax.set_xlabel('x [pix]')
+        ax.set_ylabel('y [pix]')
+
+        if standalone:
+            plt.tight_layout()
+            if path_save is not None:
+                plt.savefig(path_save, dpi=150)
+                plt.close(fig)
+            else:
+                plt.show()
     
 
     
 if __name__=='__main__':
-    
-
     
     multipliers = [0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0]
     
@@ -581,10 +629,6 @@ if __name__=='__main__':
     for survey in ['VIVA']:
     
         paths_cube = natsorted(list(Path(f'/home/mandu/workspace/research/data/{survey}_halfbeam').glob('*/cube.fits')))
-        
-        # for i, multiplier in enumerate(multipliers):
-        #     suffix = f'_I{multiplier}r25'
-        #     run_makemask_ellipse(paths_cube, multiplier_radius=multiplier, path_df='/home/mandu/workspace/research/data/catalog/cat_diameters.csv', suffix=suffix)
         
         pbar = tqdm(paths_cube)
         
@@ -604,10 +648,12 @@ if __name__=='__main__':
                 path_mask = path_cube.parent/f'mask{suffix}.fits'
                 
                 sns = ShiftnStack(path_cube, path_clfy, path_mask=path_mask)
+                sns.setup_logger(suffix=suffix)          # sets up log dir + file
                 if name_cube=='NGC1569':
                     sns.mask_specrange(-20*(u.km/u.s), 20*(u.km/u.s))      
                 sns.pbar = True
                 sns.run()
+                sns.log_summary()                        # writes summary to log
                 
                 df_stacked = sns.df_stacked
                 df_stacked[suffix[1:]] = df_stacked['y']
@@ -616,7 +662,6 @@ if __name__=='__main__':
                 else:
                     df = pd.merge(df, df_stacked[['x',suffix[1:]]])
             
-            # print(df.describe())
             path_df_out = path_cube.parent/'df_stacked.csv'
             df.to_string(path_df_out, index=False)
                     

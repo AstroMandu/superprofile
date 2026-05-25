@@ -462,9 +462,9 @@ if __name__=='__main__':
     # paths_cube = [Path('/home/mskim/workspace/research/data/test/VCC1778/cube.fits')]
     # paths_cube = [Path('/home/mskim/workspace/research/data/AVID_halfbeam/VCC169/cube.fits')]
     
-    # paths_cube = Path('/home/mskim/workspace/research/data/AVID_hann').glob('*/cube.fits')
-    # paths_cube = Path('/home/mskim/workspace/research/data/Rory/RPfiles_0.1mJy').glob('*/cube.fits')
-    paths_cube = Path('/home/mskim/workspace/research/data/LITTLE_THINGS_halfbeam').glob('*/cube.fits')
+    paths_cube = Path('/home/mskim/workspace/research/data/VIVA_REG').glob('*/cube.fits')
+    # paths_cube = Path('/home/mskim/workspace/research/data/Rory').glob('RPfiles_*mJybeam/snap12_RP00*/cube.fits')
+    # paths_cube = Path('/home/mskim/workspace/research/data/LITTLE_THINGS_halfbeam').glob('*/cube.fits')
     
     for path_cube in natsorted(list(paths_cube)):
     

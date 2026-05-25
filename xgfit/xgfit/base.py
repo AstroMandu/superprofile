@@ -74,9 +74,13 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         self.df_stacked = df_stacked
 
         # Basic arrays
+        
+        # self.df_stacked['e_y'] = 1.
+        
         self.x   = np.asarray(self.df_stacked["x"],   dtype=np.float64)
         self.y   = np.asarray(self.df_stacked["y"],   dtype=np.float64)
         self.e_y = np.asarray(self.df_stacked["e_y"], dtype=np.float64)
+        # self.e_y = np.full_like(self.e_y, 1.)
 
         self.name_cube = name_cube or "Name"
 
@@ -162,7 +166,7 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         self.thin   = 1
         self.sampler = None
         
-        self.multiplier_burnin_maxtau = 3.0
+        self.multiplier_burnin_maxtau = 5.0
         self.fallback_to_2gfit = False
         
         # Result containers
@@ -369,7 +373,7 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
     # -----------------------------
     # Top-level run
     # -----------------------------
-    def run(self, suffix: str = "", nsample_resample: int = 1499, pbar_resample: bool = False) -> None:
+    def run(self, suffix: str = "", nsample_resample: int = 1499, pbar_resample: bool = False, NGFIT='2GFIT') -> None:
         
         self.suffix = suffix
         self.nsample_resample = int(nsample_resample)
@@ -425,8 +429,10 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         # self.fit_params_3G['V33'] = 'fre'
         # self.fit_params_3G['S32'] = 'S1'
         
-        self.do_2GFIT()
-        # self.do_3GFIT()
+        if NGFIT=='2GFIT':
+            self.do_2GFIT()
+        elif NGFIT=='3GFIT':
+            self.do_3GFIT()
         self.removestat()
         
         self.cleanup()

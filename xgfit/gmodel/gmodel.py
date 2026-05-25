@@ -56,11 +56,11 @@ class Gmodel:
 
         lowF1=self.low[0]; spnF1=self.spn[0]
         lowV1=self.low[1]; spnV1=self.spn[1]
-        lowS1=self.low[2]; spnS1=self.spn[2]
+        lowS1=self.low[2]; hihS1=self.hih[2]
         lowB1=self.low[3]; spnB1=self.spn[3]
         
         loglowS1 = np.log(lowS1)
-        logspnS1 = np.log(spnS1)
+        logspnS1 = np.log(hihS1) - loglowS1
         
         logprob_njit = log_prob_1G_njit_linear
         @njit(fastmath=True, cache=True, inline='always')
@@ -92,11 +92,11 @@ class Gmodel:
 
         lowF1=self.low[0]; spnF1=self.spn[0]
         lowV1=self.low[1]; spnV1=self.spn[1]
-        lowS1=self.low[2]; spnS1=self.spn[2]
+        lowS1=self.low[2]; hihS1=self.hih[2]
         BB   =self.BB
         
         loglowS1 = np.log(lowS1)
-        logspnS1 = np.log(spnS1)
+        logspnS1 = np.log(hihS1) - loglowS1
         
         logprob_njit = log_prob_1G_B1x_njit_linear
         @njit(fastmath=True, cache=True, inline='always')

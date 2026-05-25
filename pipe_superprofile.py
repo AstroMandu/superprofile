@@ -31,15 +31,12 @@ os.environ.setdefault("MKL_DYNAMIC",          "FALSE")
 os.environ.setdefault("OMP_WAIT_POLICY",      "PASSIVE")
 # --------
 
-
 @dataclass(frozen=True)
 class MaskCtx:
     suffix: str
     radtag: str
     mode: str
     path_output: str  # str or Path is fine; choose str to be safe for pickling
-
-
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=pd.errors.PerformanceWarning)
@@ -57,23 +54,24 @@ homedirs = [
     # path_data/'LITTLE_THINGS_REG',
     # path_data/'THINGS_REG',
     # path_data/'VLA-ANGST_REG',
-    # path_data/'VIVA_REG',
+    path_data/'VIVA_REG',
 
     # path_data/'AVID'
     # path_data/'AVID_hann',
-    path_data/'AVID_hann_REG',
+    # path_data/'AVID_hann_REG',
     # path_data/'THINGS_REG',
     
     # path_data/'test',
     # path_data/'AVID_sofia1beam',
     # path_data/'AVID_sofia3beam',
     
-    # path_data/'Rory/RPfiles_0.01mJy',
-    # path_data/'Rory/RPfiles_0.4mJy',
+    # path_data/'Rory/RPfiles_0.01mJybeam',
+    # path_data/'Rory/RPfiles_0.4mJybeam',
 ]
 
 nametype_cube   = 'cube.fits'
-nametype_galaxy = '*VCC152'
+# nametype_galaxy = 'snap12*RP00*'
+nametype_galaxy = '*'
 # nametype_galaxy = None
 
 galaxies = None
@@ -101,8 +99,8 @@ names_LT = [
     # 'DDO187',
     # 'DDO210',
     # 'DDO216',
-    # 'F564-V3',
-    # 'Haro29',
+    'F564-V3',
+    'Haro29',
     'Haro36',
     'IC10',
     'IC1613',
@@ -149,8 +147,15 @@ names_AVID = [
     'VCC2037',
 ]
 
+names_VIVA = [
+    # 'NGC4713',
+    # 'NGC4808',
+    'VCC2070'
+]
+
+# galaxies = names_VIVA
 # galaxies = names_LT
-# galaxies = names_AVID
+# galaxies = names_AVID8
 # galaxies = names_ANGST
 
 # multipliers = [round(x, 2) for x in np.arange(0.10, 1.50 + 0.001, 0.05)]
@@ -166,36 +171,39 @@ use_secondary_vf      = 1
 truth_from_resampling = 1
 num_threads           = 60
 
-dict_glob['mode'] = 'baygaud'; suffix_path_output = '_2GFIT_BAYMOM_prior3'; snlim_peak=3; key_classify=3; use_secondary_vf=1;
-# dict_glob['mode'] = 'baygaud'; suffix_path_output = '_3GFIT_BAYMOM_MED_dim2_fluxF31+F32>F33'; snlim_peak=3; key_classify=3; use_secondary_vf=1;
-# dict_glob['mode'] = 'baygaud'; suffix_path_output = '_3GFIT_BAYMOM_MED_dim2_ampl'; snlim_peak=3; key_classify=3; use_secondary_vf=1;
-# dict_glob['mode'] = 'baygaud'; suffix_path_output = '_3GFIT_BAYMOM_MED'; snlim_peak=3; key_classify=3; use_secondary_vf=1;
-# 
-# dict_glob['mode'] = 'hermite'; suffix_path_output = '_3GFIT_HERMOM'; use_secondary_vf=1;
-# dict_glob['mode'] = 'hermite'; suffix_path_output = '_3GFIT_HER';    use_secondary_vf=0;
+NGFIT = '2GFIT'
+# dict_glob['mode']='BAY'; suffix_path_output = f'_2GFIT_BAY';    snlim_peak=3; key_classify=3; use_secondary_vf=0;
+# dict_glob['mode']='BAY'; suffix_path_output = f'_2GFIT_BAYMOM'; snlim_peak=3; key_classify=3; use_secondary_vf=1;
+# dict_glob['mode']='HER';    suffix_path_output = f'_2GFIT_HER';    snlim_peak=10000; key_classify=10000; use_secondary_vf=1;
+dict_glob['mode']='HERMOM'; suffix_path_output = f'_2GFIT_HERMOM';    snlim_peak=10000; key_classify=10000; use_secondary_vf=1;
+# dict_glob['mode']='MOM'; suffix_path_output = f'_2GFIT_MOM';    snlim_peak=10000; key_classify=10000; use_secondary_vf=1;
 
-statistics = 'MAP'
-# statistics = 'MEDIAN'
+# NGFIT = '3GFIT'
+# dict_glob['mode']='baygaud'; suffix_path_output = f'_3GFIT_BAYMOM'; snlim_peak=3; key_classify=3; use_secondary_vf=1;
+# dict_glob['mode']='baygaud'; suffix_path_output = f'_3GFIT_MOM';    snlim_peak=10000; key_classify=10000; use_secondary_vf=1;
 
-bool_overwrite     = 1
+# statistics = 'MAP'
+statistics = 'MEDIAN'
+
+bool_overwrite     = 0
 remove_temp        = 1
 
 overwrite_classify = 0
 bool_do_clfy       = 1
 
-guess_from_whole  = 0
+guess_from_whole  = 1
 fallback_to_2gfit = 0
 
 bool_do_whole  = 1
 bool_do_inner  = 0
 bool_do_outer  = 0
 bool_do_rings  = 0
-bool_do_angles = 1
+bool_do_angles = 0
 
-# widths_angle = [180]
-widths_angle = [60,120,180]
+# widths_angle = [60,120,180]
+widths_angle = [90]
 PAs = range(0,360,15)
-# PAs = [300]
+# PAs = [225]                                                  
 
 # angles = [0,45,90,135,180,225,270,305]
 # angles = [300]
@@ -216,6 +224,13 @@ dict_glob['radtag'] = radtag
 
 # dict_glob['method_minimize'] = 'Powell'
 dict_glob['method_minimize'] = 'Nelder-Mead'
+
+dict_glob['snlim_peak']        = snlim_peak
+dict_glob['key_classify']      = key_classify
+dict_glob['statistics']        = statistics
+dict_glob['fallback_to_2gfit'] = fallback_to_2gfit
+dict_glob['guess_from_whole']  = guess_from_whole
+dict_glob['NGFIT']             = NGFIT
 
 dict_jobs = {}  # parent-only enqueue
 
@@ -249,6 +264,8 @@ def task_clfy(job):
     path_clfy         = job['path_clfy']
     vdisp_low_intr    = job['vdisp_low_intrinsic']
     overwrite         = job['overwrite_classify']
+    snlim_peak        = job['snlim_peak']
+    key_classify      = job['key_classify']
 
     # skip if already classified (unless overwrite)
     if os.path.exists(path_clfy) and not overwrite:
@@ -279,8 +296,10 @@ def multirun_clfy(names_cube, num_cores=1):
             'path_clfy': dict_glob[nm]['path_clfy'],
             'vdisp_low_intrinsic': dict_glob['vdisp_low_intrinsic'],
             'overwrite_classify': overwrite_classify,
+            'snlim_peak':  dict_glob['snlim_peak'],
+            'key_classify': dict_glob['key_classify'],
         })
-
+    
     if len(jobs) == 1:
         task_clfy(jobs[0])
     else:
@@ -299,7 +318,7 @@ def task_main(job):
         
     # lazy imports (keeps workers lighter/safer)
     import astropy.units as u
-    from shiftnstack import ShiftnStack, ShiftnStack_hermite
+    from shiftnstack import ShiftnStack
 
     name_cube         = job['name_cube']
     path_cube         = job['path_cube']
@@ -314,7 +333,12 @@ def task_main(job):
     # dict_params       = job['dict_params']
     truth_from_resamp = job['truth_from_resampling']
     path_vf_secondary = job['path_vf_secondary'] if job['use_secondary_vf'] else None
+    secondary_mode    = job.get('secondary_mode', 'moment')
     method_minimize   = job['method_minimize']
+    statistics        = job['statistics']
+    fallback_to_2gfit = job['fallback_to_2gfit']
+    guess_from_whole  = job['guess_from_whole']
+    NGFIT             = job['NGFIT']
 
     if not os.path.exists(path_cube):
         return
@@ -623,32 +647,37 @@ def task_main(job):
     else: 
         correct_vf_secondary = dict_config_stack[name_cube]['correct_secondary_vf']
 
-    if mode == 'baygaud':
-        path_clfy = job['path_clfy']
-        if not os.path.exists(path_clfy):
-            return
-        if path_vf_secondary is not None and (not os.path.exists(path_vf_secondary)):
-            path_vf_secondary = None
-        sns = ShiftnStack(path_cube, path_clfy, path_mask=path_mask, path_vf_secondary=path_vf_secondary, correct_vf_secondary=correct_vf_secondary)
-        sns.path_temp = path_temp
-        sns.suffix    = suffix
-    else:  # 'hermite'
-        path_hermite = job['path_hermite']
-        if not os.path.exists(path_hermite):
-            return
-        sns = ShiftnStack_hermite(path_cube, path_hermite, path_mask=path_mask, path_vf_secondary=path_vf_secondary, correct_vf_secondary=correct_vf_secondary)
+    path_clfy = job['path_clfy']
+    if mode not in ('MOM',) and (path_clfy is None or not os.path.exists(path_clfy)):
+        return
+    if mode in ('MOM',):
+        path_clfy = None  # ShiftnStack will skip baygaud loop
+    if path_vf_secondary is not None and not os.path.exists(path_vf_secondary):
+        path_vf_secondary = None
+        secondary_mode    = 'MOM'
+    sns = ShiftnStack(path_cube, path_clfy, path_mask=path_mask,
+                      path_vf_secondary=path_vf_secondary,
+                      correct_vf_secondary=correct_vf_secondary,
+                      secondary_mode=secondary_mode)
+    sns.path_temp = path_temp
+    sns.suffix    = suffix
 
     # if name_cube in dict_config_stack:
     #     if dict_config_stack[name_cube]['specmask'] is not None:
     #         sns.mask_specrange(dict_config_stack[name_cube]['specmask'])
-
+    
+    sns.setup_logger(suffix=suffix)
     sns.run(stack_secondary=True)
+    sns.log_summary()
+
+    # sns.plot_map_stack_method(path_save='/home/mskim/workspace/research/data/Rory/test.png')
+    # quit()
 
     # if path_mask is not None and os.path.exists(path_mask):
     #     os.remove(path_mask)
 
     df_stacked = sns.df_stacked
-    dict_stakd  = sns.dict_stacked
+    dict_stakd = sns.dict_stacked
     df_stacked.to_string(path_cube.parent/'df_stacked.csv', index=False)
 
     from xgfit.xgfit import XGFIT
@@ -681,38 +710,45 @@ def task_main(job):
             df_GFIT = pd.read_csv(path_df_GFIT, sep=r'\s+')
             df_GFIT = df_GFIT.loc[(df_GFIT['Name']==job['name_cube']).__and__(df_GFIT['suffix']=='_')].reset_index(drop=True)
             if len(df_GFIT)>0:
-                SNR2,SNR3 = df_GFIT.loc[0,['SNR2','SNR3']]
-                if np.isfinite(SNR3):
-                    F1,S1,F31,F32,F33,S31,S32,S33,B3 = df_GFIT.loc[0,['F1','S1','F31','F32','F33','S31','S32','S33','B3']]
+                if NGFIT=='2GFIT':
+                    F1,S1,F21,F22,S21,S22,B2 = df_GFIT.loc[0,['F1','S1','F21','F22','S21','S22','B2']]
                     xgfit.dict_preguess = {
-                        # 'A31/A1':A31/A1,'A32/A1':A32/A1,'A33/A1':A33/A1,
-                        'F31/F1':F31/F1,'F32/F1':F32/F1,'F33/F1':F33/F1,
-                        'S31':S31,'S32':S32,'S33':S33
-                    }
-                    # xgfit.dict_prebound = {
-                    #     # 'S31':[0.5*S31, 999],
-                    #     'S32':[0.4*S32, 1.7*S32]
-                    #     # 'S32':[0.65*S32,1.4*S32]
-                    # }
-                if np.isfinite(SNR2) and np.isnan(SNR3):
-                    F1,S1,F21,F22,S21,S22 = df_GFIT.loc[0,['F1','S1','F21','F22','S21','S22']]
-                    # Atot = A21+A22
-                    xgfit.dict_preguess = {
-                        'F31/F1':F21/F1,'F32/F1':F22/F1,'F33/F1':0.0001*F1,
-                        'S31':S21,'S32':S22,'S33':S22+0.1
-                    }
-                    # xgfit.dict_prebound = {
-                    #     # 'S31':[0.5*S31, 999],
-                    #     # 'S32':[0.4*S22, 1.8*S22]
-                    #     # 'S32':[0.65*S32,1.4*S32]
-                    # }
+                        'F21/F1':F21/F1,'F22/F1':F22/F1,
+                        'S21':S21,'S22':S22,}
+                if NGFIT=='3GFIT':
+                    SNR2,SNR3 = df_GFIT.loc[0,['SNR2','SNR3']]
+                    if np.isfinite(SNR3):
+                        F1,S1,F31,F32,F33,S31,S32,S33,B3 = df_GFIT.loc[0,['F1','S1','F31','F32','F33','S31','S32','S33','B3']]
+                        xgfit.dict_preguess = {
+                            # 'A31/A1':A31/A1,'A32/A1':A32/A1,'A33/A1':A33/A1,
+                            'F31/F1':F31/F1,'F32/F1':F32/F1,'F33/F1':F33/F1,
+                            'S31':S31,'S32':S32,'S33':S33
+                        }
+                        # xgfit.dict_prebound = {
+                        #     # 'S31':[0.5*S31, 999],
+                        #     'S32':[0.4*S32, 1.7*S32]
+                        #     # 'S32':[0.65*S32,1.4*S32]
+                        # }
+                    if np.isfinite(SNR2) and np.isnan(SNR3):
+                        F1,S1,F21,F22,S21,S22 = df_GFIT.loc[0,['F1','S1','F21','F22','S21','S22']]
+                        # Atot = A21+A22
+                        xgfit.dict_preguess = {
+                            'F31/F1':F21/F1,'F32/F1':F22/F1,'F33/F1':0.0001*F1,
+                            'S31':S21,'S32':S22,'S33':S22+0.1
+                        }
+                        # xgfit.dict_prebound = {
+                        #     # 'S31':[0.5*S31, 999],
+                        #     # 'S32':[0.4*S22, 1.8*S22]
+                        #     # 'S32':[0.65*S32,1.4*S32]
+                        # }
             else:
                 raise RuntimeError(f'Run whole first: {job['name_cube']}')
 
     xgfit.run(
         suffix=suffix,
         pbar_resample=pbar_resample,
-        nsample_resample=nsample_resample
+        nsample_resample=nsample_resample,
+        NGFIT=NGFIT
     )
     
     df        = xgfit.df.copy()
@@ -796,6 +832,13 @@ def multirun_main(num_threads=1):
         j['truth_from_resampling']= bool(truth_from_resampling)
         j['use_secondary_vf']     = bool(use_secondary_vf)
         j['method_minimize']      = dict_glob['method_minimize']
+        j['snlim_peak']        = dict_glob['snlim_peak']
+        j['key_classify']      = dict_glob['key_classify']
+        j['statistics']        = dict_glob['statistics']
+        j['fallback_to_2gfit'] = dict_glob['fallback_to_2gfit']
+        j['guess_from_whole']  = dict_glob['guess_from_whole']
+        j['NGFIT']             = dict_glob['NGFIT']
+        
         list_jobs.append(j)
         
     list_jobs.sort(key=lambda jj: (natsort_keygen()(jj['name_cube']), natsort_keygen()(jj['suffix'])))#, reverse=True)
@@ -961,7 +1004,7 @@ def worker_angle(angle, angle_width, paths_cube, path_df, ctx: MaskCtx):
 def worker_angle_O05(angle, angle_width, paths_cube, path_df, ctx: MaskCtx):
     from makemask_angle import makemask as makemask_angle
     base = ctx.suffix
-    suffix = f"{base}A{angle:0>3}_W{angle_width:0>3}_O0.5r25"
+    suffix = f"{base}A{angle:0>3}_W{angle_width:0>3}_O0.5{ctx.radtag}"
     out_csv = Path(ctx.path_output) / f"info_stacked{suffix}_GFIT.csv"
     if out_csv.exists():
         return None
@@ -969,13 +1012,13 @@ def worker_angle_O05(angle, angle_width, paths_cube, path_df, ctx: MaskCtx):
         sv = p.parent / f"mask/mask{suffix}.fits"
         os.makedirs(sv.parent, exist_ok=True)
         makemask_angle(p, angle_center=angle, angle_width=angle_width, path_df=path_df,
-                       path_mask=p.parent/'mask/mask_O0.5r25.fits', savename=sv)
+                       path_mask=p.parent/f'mask/mask_O0.5{ctx.radtag}.fits', savename=sv)
     return {"kind": "angle", "suffix": suffix}
 
 def worker_angle_O10(angle, angle_width, paths_cube, path_df, ctx: MaskCtx):
     from makemask_angle import makemask as makemask_angle
     base = ctx.suffix
-    suffix = f"{base}A{angle:0>3}_W{angle_width:0>3}_O1.0r25"
+    suffix = f"{base}A{angle:0>3}_W{angle_width:0>3}_O1.0{ctx.radtag}"
     out_csv = Path(ctx.path_output) / f"info_stacked{suffix}_GFIT.csv"
     if out_csv.exists():
         return None
@@ -983,7 +1026,7 @@ def worker_angle_O10(angle, angle_width, paths_cube, path_df, ctx: MaskCtx):
         sv = p.parent / f"mask/mask{suffix}.fits"
         os.makedirs(sv.parent, exist_ok=True)
         makemask_angle(p, angle_center=angle, angle_width=angle_width, path_df=path_df,
-                       path_mask=p.parent/'mask/mask_O1.0r25.fits', savename=sv)
+                       path_mask=p.parent/f'mask/mask_O1.0{ctx.radtag}.fits', savename=sv)
     return {"kind": "angle", "suffix": suffix}
 
 from itertools import repeat
@@ -1014,7 +1057,8 @@ def main():
         for k in [k for k in dict_glob if k not in (
         'mode','pbar_resample','nsample_resample','vdisp_low_intrinsic',
         'radtag','method_minimize','suffix','id_run','path_output',
-        'path_plot','path_temp'
+        'path_plot','path_temp',
+        'snlim_peak','key_classify','statistics','fallback_to_2gfit','guess_from_whole','NGFIT'  # add these
         )]:
             del dict_glob[k]
         homedir = Path(homedir)
@@ -1042,29 +1086,33 @@ def main():
         for i, path_cube in enumerate(paths_cube):
             wdir = path_cube.parent
             name_cube = wdir.name
-            if dict_glob['mode']=='baygaud' and not os.path.exists(wdir/'segmts'):
+            if dict_glob['mode'] == 'BAY' and not os.path.exists(wdir/'segmts'):
                 continue
-            if dict_glob['mode']=='hermite' and not os.path.exists(wdir/'hermite.npy'):
+            if dict_glob['mode'] in ('HER', 'HERMOM') and not os.path.exists(wdir/'hermite.npy'):
                 continue
             names.append(name_cube)
+            if dict_glob['mode'] in ('HER', 'HERMOM'):
+                _path_vf_sec    = wdir/'hermite.npy'
+                _secondary_mode = dict_glob['mode']   # 'HER' or 'HERMOM'
+            else:
+                _path_vf_sec    = wdir/'cube_mom1.fits'
+                _secondary_mode = 'MOM'
             dict_glob[name_cube] = {
-                'path_cube': path_cube,
-                'name_cube': name_cube,
-                'path_mask': None,
-                'path_vf_secondary': wdir/'cube_mom1.fits'
+                'path_cube':         path_cube,
+                'name_cube':         name_cube,
+                'path_mask':         None,
+                'path_vf_secondary': _path_vf_sec,
+                'secondary_mode':    _secondary_mode,
+                'path_clfy':         None if dict_glob['mode'] == 'MOM'
+                                    else wdir/f'segmts_merged_n_classified.{key_classify}',
             }
-            if dict_glob['mode']=='baygaud':
-                dict_glob[name_cube]['path_clfy']   = wdir/f'segmts_merged_n_classified.{key_classify}'
-            if dict_glob['mode']=='hermite':
-                dict_glob[name_cube]['path_hermite'] = wdir/'hermite.npy'
 
         dict_glob['suffix'] = suffix
         dict_glob['id_run'] = str(time.time()).split(".")[-1]
-
+        
         if path_output is None:
             path_output = homedir
         dict_glob['path_output'] = path_output
-        os.makedirs(path_output, exist_ok=True)
         
         mask_ctx = MaskCtx(
             suffix=dict_glob['suffix'],
@@ -1072,14 +1120,6 @@ def main():
             mode=dict_glob['mode'],
             path_output=str(dict_glob['path_output']),
         )
-
-        # clean pre-existing
-        if remove_temp:
-            for d in glob.glob(str(path_output/'temp_*/')):
-                shutil.rmtree(d, ignore_errors=True)
-            for f in glob.glob(str(path_output/'Plotfit_stat*.csv')):
-                try: os.remove(f)
-                except: pass
 
         # if bool_overwrite:
         #     for f in glob.glob(str(path_output/'info_stacked*')):
@@ -1093,8 +1133,17 @@ def main():
         #         os.makedirs(pngdir, exist_ok=True)
 
         # classify
-        if bool_do_clfy and dict_glob['mode']=='baygaud':
+        if bool_do_clfy and dict_glob['mode'] not in ('MOM',):
             multirun_clfy(names, num_cores=num_threads)
+
+        os.makedirs(path_output, exist_ok=True)
+        # clean pre-existing
+        if remove_temp:
+            for d in glob.glob(str(path_output/'temp_*/')):
+                shutil.rmtree(d, ignore_errors=True)
+            for f in glob.glob(str(path_output/'Plotfit_stat*.csv')):
+                try: os.remove(f)
+                except: pass
 
         # whole
         if bool_do_whole:
@@ -1148,13 +1197,15 @@ def main():
             
         if bool_do_angles:
             # 2) common ellipse masks (serial; shared outputs)
-            run_makemask_ellipse(paths_cube, multiplier_radius=0.5, col_radius='r25', path_df=path_data/'catalog/cat_diameters.csv')
-            run_makemask_ellipse(paths_cube, multiplier_radius=1.0, col_radius='r25', path_df=path_data/'catalog/cat_diameters.csv')
+            run_makemask_ellipse(paths_cube, multiplier_radius=0.5, col_radius=radtag, path_df=path_data/'catalog/cat_diameters.csv')
+            run_makemask_ellipse(paths_cube, multiplier_radius=1.0, col_radius=radtag, path_df=path_data/'catalog/cat_diameters.csv')
 
             # 3) angles (parallel)
             # for W in (180, 90):
             for W in widths_angle:
                 tasks = [('base', a, W) for a in PAs]
+                # tasks = [('O05', a, W) for a in PAs]
+                # tasks = [('base', a, W) for a in PAs] + [('O05', a, W) for a in PAs]
 
                 # serial fallback
                 if len(tasks) == 1:

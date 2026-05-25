@@ -17,7 +17,7 @@ from tqdm import tqdm
 from ..gmodel import map_params
 from ..subroutines import (check_converged_resampling, gaussian_area, idx,
                            makefit_bg_linefree_njit, sort_outliers,
-                           trim_outlier_mahalanobis, compute_aic_bic_aicc)
+                           trim_outlier_mahalanobis, compute_aic_bic_aicc,gauss)
 
 
 class ResamplingMixin:
@@ -67,24 +67,30 @@ class ResamplingMixin:
             npars = len(names)
             
             if self.truth_from_resampling:
-                for i,label in enumerate(names):
+                
+                # XG parameters (existing)
+                for i, label in enumerate(names):
                     samples = sort_outliers(resampled[:,i])
                     p16,p50,p84 = np.percentile(samples, [16, 50, 84])
                     
                     if statistics=='MAP':
                         kde = gaussian_kde(samples)
-                        x_grid = np.linspace(samples.min(),samples.max(),1000)
+                        x_grid = np.linspace(samples.min(), samples.max(), 1000)
                         kde_values = kde.evaluate(x_grid)
                         marginal_map = x_grid[np.argmax(kde_values)]
-                        # marginal_map = half_sample_mode(samples)
                         self.df[label] = marginal_map
-                        
-                        # idx_MLE = np.argmin(funs)
-                        # self.df[label] = resampled[idx_MLE,i]
-
+                        cdf = np.cumsum(kde_values) / np.sum(kde_values)
+                        map_cdf = cdf[np.argmax(kde_values)]
+                        e_plus  = np.interp(np.clip(map_cdf + 0.341, 0, 1), cdf, x_grid) - marginal_map
+                        e_minus = marginal_map - np.interp(np.clip(map_cdf - 0.341, 0, 1), cdf, x_grid)
+                        self.df[f'e+_{label}'] = e_plus
+                        self.df[f'e-_{label}'] = e_minus
                     if statistics == 'MEDIAN':
                         self.df[label] = p50
-                        
+                        self.df[f'e+_{label}'] = p84-p50
+                        self.df[f'e-_{label}'] = p50-p16
+
+                # F -> A conversion (existing)
                 for i, label in enumerate(names):
                     par,Gg = label[0],label[1:]
                     if par=='F':
@@ -92,14 +98,52 @@ class ResamplingMixin:
                         SS = self.df.loc[0,f'S{Gg}']
                         AA = FF/(SS*2.50662827463)
                         self.df[f'A{Gg}'] = AA
-                    if par=='A':
-                        AA = self.df.loc[0,label]
-                        SS = self.df.loc[0,f'S{Gg}']
-                        FF = AA*SS*2.50662827463
-                        self.df[f'F{Gg}'] = FF
-                        
-                S1s = resampled_1G[:, 2]
-                self.df['S1'] = np.percentile(sort_outliers(S1s),50)
+
+                # 1G parameters from resampled_1G (add)
+                def adopt_samples(samples, label):
+                    samples = sort_outliers(samples)
+                    p16,p50,p84 = np.percentile(samples, [16, 50, 84])
+                    if statistics == 'MAP':
+                        kde = gaussian_kde(samples)
+                        x_grid = np.linspace(samples.min(), samples.max(), 1000)
+                        kde_values = kde.evaluate(x_grid)
+                        map_val = x_grid[np.argmax(kde_values)]
+                        cdf = np.cumsum(kde_values) / np.sum(kde_values)
+                        map_cdf = cdf[np.argmax(kde_values)]
+                        self.df[label]          = map_val
+                        self.df[f'e+_{label}']  = np.interp(np.clip(map_cdf+0.341,0,1), cdf, x_grid) - map_val
+                        self.df[f'e-_{label}']  = map_val - np.interp(np.clip(map_cdf-0.341,0,1), cdf, x_grid)
+                    elif statistics == 'MEDIAN':
+                        self.df[label]          = p50
+                        self.df[f'e+_{label}']  = p84-p50
+                        self.df[f'e-_{label}']  = p50-p16
+
+                for i, label in enumerate(names_1G):
+                    adopt_samples(resampled_1G[:, i], label)
+
+                # recompute A1 from adopted F1, S1
+                F1 = self.df.loc[0,'F1']
+                S1 = self.df.loc[0,'S1']
+                self.df['A1'] = F1 / (S1 * 2.50662827463)
+                
+                n = len(self.gmodel.x)
+                # G=1: residuals from adopted 1G parameters
+                if G == 1:
+                    residuals_1G = self.get_residuals(G=1)
+                else:
+                    # recompute 1G residuals from median of resampled_1G
+                    S1s = resampled_1G[:, 2]
+                    # use df which already has adopted 1G params filled
+                    residuals_1G = self.y - (gauss(self.x, self.df.loc[0,'A1'], self.df.loc[0,'V1'], self.df.loc[0,'S1']) + self.df.loc[0,'B1'])
+                
+                logl_1G = -0.5 * np.sum((residuals_1G / self.e_y)**2 + np.log(2*np.pi*self.e_y**2))
+                npars_1G = len(gmodel_resample_1G.names_param)
+                self.df['AIC1'], self.df['BIC1'], self.df['AICc1'] = compute_aic_bic_aicc(logl_1G, npars_1G, n)
+
+                # XG: residuals from adopted XG parameters
+                residuals_XG = self.get_residuals(G=G)
+                logl_XG = -0.5 * np.sum((residuals_XG / self.e_y)**2 + np.log(2*np.pi*self.e_y**2))
+                self.df[f'AIC{G}'], self.df[f'BIC{G}'], self.df[f'AICc{G}'] = compute_aic_bic_aicc(logl_XG, npars, n)
 
             for ii in range(npars):
                 for jj in range(ii+1,npars):
@@ -111,8 +155,20 @@ class ResamplingMixin:
                     xx,yy = trim_outlier_mahalanobis(xx,yy)
                     self.df_params[f'rs_{names[ii]}{names[jj]}'],self.df_params[f'p_rs_{names[ii]}{names[jj]}'] = spearmanr(xx,yy)
                     
-            # self.df_params['WAIC'] = compute_waic(-1*funs)
-            self.df_params['AIC'],self.df_params['BIC'],self.df_params['AICc'] = compute_aic_bic_aicc((-1*funs).max(), npars, len(self.gmodel.x))
+            
+
+
+
+            logl_1G = -0.5 * np.sum((residuals_1G / self.e_y)**2 + np.log(2*np.pi*self.e_y**2))
+            npars_1G = len(gmodel_resample_1G.names_param)
+            self.df_params['AIC1'], self.df_params['BIC1'], self.df_params['AICc1'] = \
+                compute_aic_bic_aicc(logl_1G, npars_1G, n)
+
+            # XG: residuals from adopted XG parameters
+            residuals_XG = self.get_residuals(G=G)
+            logl_XG = -0.5 * np.sum((residuals_XG / self.e_y)**2 + np.log(2*np.pi*self.e_y**2))
+            self.df_params[f'AIC{G}'], self.df_params[f'BIC{G}'], self.df_params[f'AICc{G}'] = \
+                compute_aic_bic_aicc(logl_XG, npars, n)
 
             S1s = resampled_1G[:, 2]
             
@@ -123,33 +179,69 @@ class ResamplingMixin:
             if G==1: return
             
             if G==2:
-                self.df_params['sn'] = self.df.loc[0,'S21']
-                self.df_params['sb'] = self.df.loc[0,'S22']
-                self.df_params['An'] = gaussian_area(self.df.loc[0,'A21'],self.df.loc[0,'S21'])
-                self.df_params['Ab'] = gaussian_area(self.df.loc[0,'A22'],self.df.loc[0,'S22'])
+                self.df_params['sn']    = self.df.loc[0,'S21']
+                self.df_params['sb']    = self.df.loc[0,'S22']
+                self.df_params['An']    = self.df.loc[0,'F21']
+                self.df_params['Ab']    = self.df.loc[0,'F22']
+                self.df_params['At']    = self.df.loc[0,'F21'] + self.df.loc[0,'F22']
+                self.df_params['An/At'] = self.df_params.loc[0,'An']/self.df_params.loc[0,'At']
+                self.df_params['Ab/At'] = self.df_params.loc[0,'Ab']/self.df_params.loc[0,'At']
                 
                 iS21,iS22 = idx(names,'S21'),idx(names,'S22')
                 sns = resampled[:, iS21]
                 sbs = resampled[:, iS22]
                 
+                Ans = resampled[:, idx(names,'F21')]
+                Abs = resampled[:, idx(names,'F22')]
+                Ats = Ans + Abs
+                
+                self.df_params['e-_sn'],self.df_params['e+_sn'] = error_lower_upper(sns)
+                self.df_params['e-_sb'],self.df_params['e+_sb'] = error_lower_upper(sbs)
+                
+                self.df_params['e-_An'],self.df_params['e+_An'] = error_lower_upper(Ans)
+                self.df_params['e-_Ab'],self.df_params['e+_Ab'] = error_lower_upper(Abs)
+                self.df_params['e-_At'],self.df_params['e+_At'] = error_lower_upper(Ats)
+                self.df_params['e-_An/At'],self.df_params['e+_An/At'] = error_lower_upper(Ans/Ats)
+                self.df_params['e-_Ab/At'],self.df_params['e+_Ab/At'] = error_lower_upper(Abs/Ats)
+
                 self.df_params['tension_S21S22'] = calc_tension(resampled[:,iS21],resampled[:,iS22])
                 
             if G==3:
                 self.df_params['sn'] = self.df.loc[0,'S31']
                 self.df_params['sb'] = self.df.loc[0,'S32']
                 self.df_params['sw'] = self.df.loc[0,'S33']
-                self.df_params['An'] = gaussian_area(self.df.loc[0,'A31'],self.df.loc[0,'S31'])
-                self.df_params['Ab'] = gaussian_area(self.df.loc[0,'A32'],self.df.loc[0,'S32'])
+                self.df_params['An'] = self.df.loc[0,'F31']
+                self.df_params['Ab'] = self.df.loc[0,'F32']
+                self.df_params['Aw'] = self.df.loc[0,'F33']
+                self.df_params['At'] = self.df_params.loc[0,'An'] + self.df_params.loc[0,'Ab'] + self.df_params.loc[0,'Aw']
+                self.df_params['An/At'] = self.df_params.loc[0,'An']/self.df_params.loc[0,'At']
+                self.df_params['Ab/At'] = self.df_params.loc[0,'Ab']/self.df_params.loc[0,'At']
+                self.df_params['Aw/At'] = self.df_params.loc[0,'Aw']/self.df_params.loc[0,'At']
                 
                 iA21,iA22,iS31,iS32 = idx(names,['A31','A32','S31','S32'])
                 sns = resampled[:, iS31]
                 sbs = resampled[:, iS32] if 'S32' in names else self.df.loc[0,'S22']
-                
                 iS33 = idx(names,'S33')
                 sws  = resampled[:,iS33]
                 # self.df_params['e_sw'] = np.nanstd(sort_outliers(sws))
                 self.df_params['e-_sw'],self.df_params['e+_sw'] = error_lower_upper(sws)
                 
+                Ans = resampled[:, idx(names,'F31')]
+                Abs = resampled[:, idx(names,'F32')]
+                Aws = resampled[:, idx(names,'F33')]
+                Ats = Ans + Abs + Aws
+                
+                self.df_params['e-_sn'],self.df_params['e+_sn'] = error_lower_upper(sns)
+                self.df_params['e-_sb'],self.df_params['e+_sb'] = error_lower_upper(sbs)
+                self.df_params['e-_sw'],self.df_params['e+_sw'] = error_lower_upper(sws)
+                
+                self.df_params['e-_An'],self.df_params['e+_An'] = error_lower_upper(Ans)
+                self.df_params['e-_Ab'],self.df_params['e+_Ab'] = error_lower_upper(Abs)
+                self.df_params['e-_At'],self.df_params['e+_At'] = error_lower_upper(Ats)
+                self.df_params['e-_An/At'],self.df_params['e+_An/At'] = error_lower_upper(Ans/Ats)
+                self.df_params['e-_Ab/At'],self.df_params['e+_Ab/At'] = error_lower_upper(Abs/Ats)
+                self.df_params['e-_Aw/At'],self.df_params['e+_Aw/At'] = error_lower_upper(Aws/Ats)
+
                 self.df_params['tension_S31S32'] = calc_tension(resampled[:,iS31],resampled[:,iS32])
                 self.df_params['tension_S32S33'] = calc_tension(resampled[:,iS32],resampled[:,iS33])
             
@@ -165,10 +257,7 @@ class ResamplingMixin:
             
             # self.df_params["e_sn"] = np.nanstd(sort_outliers(sns))
             # self.df_params["e_sb"] = np.nanstd(sort_outliers(sbs))
-            
-            self.df_params['e-_sn'],self.df_params['e+_sn'] = error_lower_upper(sns)
-            self.df_params['e-_sb'],self.df_params['e+_sb'] = error_lower_upper(sbs)
-            
+
             # self.df_params["e_An"] = np.nanstd(sort_outliers(Ans))
             # self.df_params["e_Ab"] = np.nanstd(sort_outliers(Abs))
             # self.df_params["e_At"] = np.nanstd(sort_outliers(Ats))
@@ -295,8 +384,8 @@ class ResamplingMixin:
                     if converged: 
                         resampled    = resampled[   :j,:]
                         resampled_1G = resampled_1G[:j,:]
-                        BBs       = BBs[:j]
-                        funs      = funs[:j]
+                        BBs          = BBs[:j]
+                        funs         = funs[:j]
                         self.df_params['Nsample'] = j
                         break
                 

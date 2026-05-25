@@ -119,6 +119,8 @@ def _inv_logunif(x, loglow, logspn): return (np.log(x)-loglow)/logspn
 
 def map_params(params, gmodel, mode:Literal['x->u','u->x']):
     
+    params = np.asarray(params)
+    
     low = gmodel.low
     hih = gmodel.hih
     spn = gmodel.spn
@@ -145,7 +147,8 @@ def map_params(params, gmodel, mode:Literal['x->u','u->x']):
     #G1
     if 'S1' in names:
         iS1 = 2
-        loglowS1,logspnS1 = np.log(low[None,iS1]),np.log(spn[None,iS1])
+        loglowS1 = np.log(low[None,iS1])
+        logspnS1 = np.log(hih[None,iS1]) - loglowS1
         params_mapped[:,iS1] = mapper_logunif(params[:,iS1],loglowS1,logspnS1)
     
     #G2

@@ -13,9 +13,9 @@ import os
 # Suppress the FITSFixedWarning
 warnings.simplefilter('ignore', FITSFixedWarning)
 
-def run_makemask(paths_cube, multiplier_radius, col_radius, maskwheres=['I','O'], path_df='/home/mandu/workspace/research/data/catalog/cat_diameters.csv'):
+def run_makemask(paths_cube, multiplier_radius, col_radius, maskwheres=['I','O'], path_df='/home/mskim/workspace/research/data/catalog/cat_diameters.csv'):
 
-    df_diam = pd.read_csv(path_df, sep='\s+')
+    
    
     for maskwhere in maskwheres:
         for path_cube in paths_cube:
@@ -24,33 +24,29 @@ def run_makemask(paths_cube, multiplier_radius, col_radius, maskwheres=['I','O']
             galname = path_cube.parent.name
             
             if(path_cube.parent.parent.parent.name=='Rory'):
-                print('[Makemask_ellipse] Using pre-defined config')
-                ra = '0h0m0.0'
-                dec = '0d0m0s'
-                radius = 155* u.arcsec * multiplier_radius
-                radtag = 'r25'
-                axr = 0.5
-                pa  = 90 * u.deg
+                df_diam = pd.read_csv('/home/mskim/workspace/research/data/Rory/cat_diameters_rorysim.csv', sep='\\s+')
             else:
-                try:
-                    loc = np.argwhere(df_diam['Name']==galname).item()
-                except ValueError:
-                    raise ValueError('[Makemask_ellipse] {} not found in diameter catalog.'.format(galname))
-                ra  = df_diam.loc[loc,'RA']
-                dec = df_diam.loc[loc,'Dec']
-                axr = df_diam.loc[loc,'b/a']
-                pa  = df_diam.loc[loc,'PA']  * u.deg
-
-                if col_radius=='r25':
-                    radius = df_diam.loc[loc,'r25'] * u.arcsec * multiplier_radius
-                    radtag = 'r25'
-                if col_radius=='RHI(kpc)':
-                    df_diam['RHI_arcsec'] = (df_diam['RHI(kpc)']/1000) / df_diam['D'] * 180/np.pi * 3600
-                    radius = df_diam.loc[loc,'RHI_arcsec'] * u.arcsec * multiplier_radius
-                    radtag = 'RHI'
+                df_diam = pd.read_csv(path_df, sep='\s+')
                 
-                    
-                    # if np.isfinite(df_diam.loc[loc,'r25'])==False: radius = np.nan
+            try:
+                loc = np.argwhere(df_diam['Name']==galname).item()
+            except ValueError:
+                raise ValueError('[Makemask_ellipse] {} not found in diameter catalog.'.format(galname))
+            ra  = df_diam.loc[loc,'RA']
+            dec = df_diam.loc[loc,'Dec']
+            axr = df_diam.loc[loc,'b/a']
+            pa  = df_diam.loc[loc,'PA']  * u.deg
+
+            if col_radius=='r25':
+                radius = df_diam.loc[loc,'r25'] * u.arcsec * multiplier_radius
+                radtag = 'r25'
+            if col_radius=='RHI':
+                df_diam['RHI_arcsec'] = (df_diam['RHI(kpc)']/1000) / df_diam['D'] * 180/np.pi * 3600
+                radius = df_diam.loc[loc,'RHI_arcsec'] * u.arcsec * multiplier_radius
+                radtag = 'RHI'
+            
+                
+                # if np.isfinite(df_diam.loc[loc,'r25'])==False: radius = np.nan
             
             data_mask = makemask(path_cube, 
                                 ra,dec,

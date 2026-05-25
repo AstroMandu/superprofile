@@ -43,6 +43,7 @@ class Plotter:
         # self.savename_GFIT            = path_plot / "Plotfit_{{}}GFIT{}_{}.png".format(suffix,self.name_cube)
         
         self.xs = np.linspace(self.gmodel.x.min(), self.gmodel.x.max(), 1000)
+        self.chansep = np.mean(np.abs(np.diff(self.xs)))
         
         self.x   = self.gmodel.x
         self.y   = self.gmodel.y
@@ -486,6 +487,17 @@ class Plotter:
         else:
             model_totl = np.sum([gauss(self.xs,self.df[f'A{G}{g}'].item(),self.df[f'V{G}{g}'].item(),self.df[f'S{G}{g}'].item()) for g in range(1,G+1)],axis=0)+self.df[f'B{G}'].item()
         ax.plot(self.xs, model_totl, color='black', alpha=0.5, label=r'$\Sigma$')
+        
+        BIC = self.df[f'BIC{G}'].item()
+        bic_text = f'BIC={BIC:.1f}'
+        if G > 1:
+            BIC_prev = self.df[f'BIC1'].item()
+            dBIC = BIC - BIC_prev
+            bic_text += f'\n$\\Delta \\ BIC_{{{G}-1}}={dBIC:.1f}$'
+        ax_GFIT.text(0.01, 0.99, bic_text, va='top', ha='left',
+                    transform=ax_GFIT.transAxes, fontsize=10,
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor='gray', alpha=0.8))
+        
         ax.legend(title='S/N={:.0f}'.format(SNRG), loc='upper right')
 
         if G==1:
@@ -588,7 +600,8 @@ class Plotter:
         ax2 = ax.twinx()
         bins = np.arange(0,np.nanmax(self.list_disp),1)
         # sns.histplot(x=self.list_disp, bins=bins, color='tab:gray', alpha=0.5, weights=weights, ax=ax2, edgecolor=None, kde=True)
-        sns.histplot(x=self.list_disp, binwidth=1, color='tab:gray', alpha=0.5, weights=weights, ax=ax2, edgecolor=None, kde=True)
+        
+        sns.histplot(x=self.list_disp, binwidth=2, color='tab:gray', alpha=0.5, weights=weights, ax=ax2, edgecolor=None, kde=True)
                 
         S1 = self.df['S1'].item()
         ax.axvline(S1, color='black')
