@@ -1,6 +1,16 @@
 import numpy as np
 from numba import njit
 
+
+def select_spatial_mask(data, value=None):
+    """Convert a mask to 1/NaN, retaining NaN exclusions for either IO choice."""
+    if value is None:
+        return data
+    if value not in (0, 1):
+        raise ValueError('mask_value must be 0 (outer), 1 (inner), or None')
+    return np.where(np.isfinite(data) & (data == value), 1.0, np.nan)
+
+
 @njit(fastmath=True, cache=True)
 def argfind_nearest(array, value):
     n = array.shape[0]
@@ -78,3 +88,13 @@ def shifter_gipsy(yy, sa, center, xx, fill=0.0, index_centr=0):
             valid[i]   = True
 
     return shifted, valid
+
+
+def summed_flux_error(noise_per_beam, counts, pixels_per_beam):
+    """Approximate Jy error of a spatial sum, treating beam areas as independent.
+
+    N pixels cover N/P beams. The integrated-flux uncertainty is therefore
+    sigma_beam * sqrt(N/P), without an additional pixel/beam conversion.
+    Interpolation and full noise covariance are not modeled here.
+    """
+    return noise_per_beam * np.sqrt(np.asarray(counts) / pixels_per_beam)

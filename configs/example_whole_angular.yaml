@@ -1,0 +1,41 @@
+# Example: one whole-galaxy fit plus unrestricted angular-wedge fits.
+# From pipeline/: python3 pipe_superprofile.py --config ../configs/example_whole_angular.yaml
+preset: viva-test
+
+# Input layout: <data_dir>/<galaxy>/cube.fits (and hermite.npy).
+data_dir: /home/mskim/workspace/research/data/VIVA/VIVA
+# data_dir: /home/mskim/workspace/research/data/AVID/AVID_nattaper_hann
+# data_dir: /home/mskim/workspace/research/data/AVID/test_sofiassnr
+# Optional subset; omit to process every galaxy under data_dir.
+# Numbered variants use VCC656 catalog geometry unless an exact entry exists.
+# galaxies: [VCC656_1,VCC656_2]
+
+# Results: <data_dir>/<galaxy>/NGFIT/example_whole_angular_2GFIT_HERMOM/
+output_dir_name: HERMOM
+output_dir: null
+# output_dir: /home/mskim/workspace/research/data/MFS/MFS_98arcsec_2GFIT_HERMOM  # null: per-galaxy output; a path: shared output override.
+# output_dir: /home/mskim/workspace/research/data/AVID/AVID_hann_2GFIT_HERMOM  # null: per-galaxy output; a path: shared output override.
+
+workers: 60
+progress: terminal
+overwrite: false
+
+fit:
+  correlation_diagnostics: false  # true: robust pairwise Spearman diagnostics.
+  intermediate_plots: false  # Keep final/error plots; skip intermediate atlases.
+  walk_plot_max_steps: 1000  # Display only; fitting samples are unchanged.
+  walk_plot_max_walkers: 30
+  mode: HERMOM
+  model: 2GFIT
+  initmod: 123
+  resamples: 10000
+  guess_from_whole: true  # Angular fits use the whole fit as their initial guess.
+
+masks:
+  cleanup_after_run: true  # true: delete used masks after success; false: keep masks.
+  regions: [whole,angle]
+  # Only objname, Diam_ra and Diam_dec are required; ellipse fields may be missing.
+  # Unrestricted wedges have no radial cut.
+  catalog: /home/mskim/workspace/research/data/catalog/diameters_NEDLVS.csv
+  angles: {start: 0, stop: 360, step: 15}  # 0, 15, ..., 345 degrees.
+  angle_widths: [60,90,120]  # Wedge width in degrees.

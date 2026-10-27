@@ -13,7 +13,8 @@ from radio_beam import Beam
 warnings.simplefilter('ignore', FITSFixedWarning)
 
 def run_makemask(paths_cube, multiplier_radius_center, width, col_radius,
-                 path_df='/home/mandu/workspace/research/data/catalog/cat_diameters.csv'):
+                 path_df='/home/mandu/workspace/research/data/catalog/cat_diameters.csv',
+                 colname_RA='RA', colname_DEC='Dec'):
 
     df_diam = pd.read_csv(path_df, sep=r'\s+')
     df_diam['RHI_arcsec'] = (df_diam['RHI(kpc)'] / 1000) / df_diam['D'] * (180 / np.pi) * 3600
@@ -33,8 +34,9 @@ def run_makemask(paths_cube, multiplier_radius_center, width, col_radius,
             raise ValueError(f'Galaxy name not found in catalog: {galname}')
 
         # Galaxy ellipse parameters
-        ra = df_diam.loc[loc, 'RA']
-        dec = df_diam.loc[loc, 'Dec']
+        col_dec = colname_DEC if colname_DEC in df_diam.columns else ('DEC' if 'DEC' in df_diam.columns else colname_DEC)
+        ra = df_diam.loc[loc, colname_RA]
+        dec = df_diam.loc[loc, col_dec]
         axr = df_diam.loc[loc, 'b/a']
         pa = df_diam.loc[loc, 'PA'] * u.deg
 
@@ -81,8 +83,8 @@ def run_makemask(paths_cube, multiplier_radius_center, width, col_radius,
             data_mask = np.where(np.isfinite(data_mask_inner) & np.isfinite(data_mask_outer), 1, np.nan)
 
         # Save mask
-        maskdir = path_cube.parent / 'mask'
-        maskdir.mkdir(exist_ok=True)
+        maskdir = path_cube.parent / 'NGFIT' / 'mask'
+        maskdir.mkdir(parents=True, exist_ok=True)
         writename = maskdir / f'mask_R{multiplier_radius_center:.2f}{radtag}.fits'
         fits.writeto(writename, data_mask, overwrite=True)
 

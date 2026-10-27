@@ -33,7 +33,8 @@ class CleanupMixin:
             "df_stacked",
 
             # any cached dicts that might be large
-            "dict_stacked", "list_disp","sampler"
+            "dict_stacked", "list_disp", "list_NHI_", "sampler",
+            "_plot_checkpoint", "plotter", "guess", "guess_1G",
         ]
 
         for a in big_attrs:

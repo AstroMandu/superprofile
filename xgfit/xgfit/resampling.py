@@ -15,9 +15,73 @@ from scipy.stats import gaussian_kde, spearmanr
 from tqdm import tqdm
 
 from ..gmodel import map_params
-from ..subroutines import (check_converged_resampling, gaussian_area, idx,
+from ..subroutines import (check_converged_resampling, compute_widths, gaussian_area, idx,
                            makefit_bg_linefree_njit, sort_outliers,
-                           trim_outlier_mahalanobis, compute_aic_bic_aicc,gauss)
+                           trim_outlier_mahalanobis, compute_aic_bic_aicc,gauss, kde_map,
+                           fill_snr)
+
+
+def synchronize_tied_centers(frame, names, components):
+    """Refresh derived centers after adopting resampled free parameters."""
+    if components < 2:
+        return
+    shared = f'V{components}1'
+    if shared not in names:
+        frame[shared] = frame['V1']
+    for component in range(2, components + 1):
+        center = f'V{components}{component}'
+        if center not in names:
+            frame[center] = frame[shared]
+
+
+def fit_resampled_baseline(model, physical_guess, data, method):
+    """Fit in mapped coordinates and return the baseline in physical units."""
+    mapped = map_params(physical_guess, model, mode='x->u')
+    result = minimize(model.log_prob_resample, mapped, args=(data,), method=method)
+    if not result.success or not np.isfinite(result.fun):
+        raise RuntimeError('Resampled baseline fit failed to converge')
+    physical = map_params(result.x, model, mode='u->x')
+    baseline = float(physical[idx(model.names_param, 'B1')])
+    if not np.isfinite(baseline):
+        raise RuntimeError('Resampled baseline fit returned a nonfinite baseline')
+    return baseline
+
+
+def fill_correlation_diagnostics(frame, names, samples, enabled=False):
+    """Optional robust pairwise diagnostics; preserve columns when disabled."""
+    for ii in range(len(names)):
+        for jj in range(ii + 1, len(names)):
+            correlation, probability = np.nan, np.nan
+            if enabled:
+                xx, yy = trim_outlier_mahalanobis(samples[:, ii], samples[:, jj])
+                correlation, probability = spearmanr(xx, yy)
+            frame[f'rs_{names[ii]}{names[jj]}'] = correlation
+            frame[f'p_rs_{names[ii]}{names[jj]}'] = probability
+
+
+def refresh_fit_diagnostics(fitter, names, components):
+    """Update noise and S/N from the final, consistent model parameters."""
+    synchronize_tied_centers(fitter.df, names, components)
+    for count in sorted({1, components}):
+        fill_snr(fitter.df, fitter.get_residuals(G=count), count)
+
+
+def residual_noise_rows(residuals, nsample, channels, batch_size=128):
+    """Bound peak noise memory while preserving legacy draws and RNG state.
+
+    Advance the global RNG as the old full-matrix draw did. Replay those draws
+    from a private copy in small batches, leaving optimizer/start draws intact.
+    """
+    replay = np.random.RandomState()
+    replay.set_state(np.random.get_state())
+    for start in range(0, nsample, batch_size):
+        np.random.choice(residuals, size=(min(batch_size, nsample-start), channels), replace=True)
+
+    def rows():
+        for start in range(0, nsample, batch_size):
+            batch = replay.choice(residuals, size=(min(batch_size, nsample-start), channels), replace=True)
+            yield from batch
+    return rows()
 
 
 class ResamplingMixin:
@@ -28,6 +92,23 @@ class ResamplingMixin:
                 
         del self.df_params
         self._init_params_df()
+        
+        # def fill_SNR(G):
+        #     residuals        = self.get_residuals(G=G)
+        #     self.df[f"N{G}"] = float(np.sqrt(np.mean(residuals**2)))
+        #     if G==1:
+        #         A1,N1 = self.df.loc[0,['A1','N1']]
+        #         self.df['SNR1'] = A1/N1
+        #     else:
+        #         As = self.df.loc[0,[f'A{G}{g}' for g in range(1,G+1)]]
+                                
+        #         NN = self.df.loc[0,f'N{G}']
+        #         self.df[f'SNR{G}'] = np.sum(As) / NN
+                
+        #         for g in range(1,G+1):
+        #             Ag = self.df.loc[0,f'A{G}{g}']
+        #             self.df[f'SNR{G}{g}'] = Ag / NN
+        #     return
         
         def half_sample_mode(samples):
             """
@@ -74,15 +155,11 @@ class ResamplingMixin:
                     p16,p50,p84 = np.percentile(samples, [16, 50, 84])
                     
                     if statistics=='MAP':
-                        kde = gaussian_kde(samples)
-                        x_grid = np.linspace(samples.min(), samples.max(), 1000)
-                        kde_values = kde.evaluate(x_grid)
-                        marginal_map = x_grid[np.argmax(kde_values)]
-                        self.df[label] = marginal_map
-                        cdf = np.cumsum(kde_values) / np.sum(kde_values)
-                        map_cdf = cdf[np.argmax(kde_values)]
-                        e_plus  = np.interp(np.clip(map_cdf + 0.341, 0, 1), cdf, x_grid) - marginal_map
-                        e_minus = marginal_map - np.interp(np.clip(map_cdf - 0.341, 0, 1), cdf, x_grid)
+                        map_val, x_grid, cdf, imax = kde_map(samples, with_cdf=True)
+                        self.df[label] = map_val
+                        map_cdf = cdf[imax]
+                        e_plus  = np.interp(np.clip(map_cdf + 0.341, 0, 1), cdf, x_grid) - map_val
+                        e_minus = map_val - np.interp(np.clip(map_cdf - 0.341, 0, 1), cdf, x_grid)
                         self.df[f'e+_{label}'] = e_plus
                         self.df[f'e-_{label}'] = e_minus
                     if statistics == 'MEDIAN':
@@ -104,15 +181,13 @@ class ResamplingMixin:
                     samples = sort_outliers(samples)
                     p16,p50,p84 = np.percentile(samples, [16, 50, 84])
                     if statistics == 'MAP':
-                        kde = gaussian_kde(samples)
-                        x_grid = np.linspace(samples.min(), samples.max(), 1000)
-                        kde_values = kde.evaluate(x_grid)
-                        map_val = x_grid[np.argmax(kde_values)]
-                        cdf = np.cumsum(kde_values) / np.sum(kde_values)
-                        map_cdf = cdf[np.argmax(kde_values)]
-                        self.df[label]          = map_val
-                        self.df[f'e+_{label}']  = np.interp(np.clip(map_cdf+0.341,0,1), cdf, x_grid) - map_val
-                        self.df[f'e-_{label}']  = map_val - np.interp(np.clip(map_cdf-0.341,0,1), cdf, x_grid)
+                        map_val, x_grid, cdf, imax = kde_map(samples, with_cdf=True)
+                        self.df[label] = map_val
+                        map_cdf = cdf[imax]
+                        e_plus  = np.interp(np.clip(map_cdf + 0.341, 0, 1), cdf, x_grid) - map_val
+                        e_minus = map_val - np.interp(np.clip(map_cdf - 0.341, 0, 1), cdf, x_grid)
+                        self.df[f'e+_{label}'] = e_plus
+                        self.df[f'e-_{label}'] = e_minus
                     elif statistics == 'MEDIAN':
                         self.df[label]          = p50
                         self.df[f'e+_{label}']  = p84-p50
@@ -121,10 +196,24 @@ class ResamplingMixin:
                 for i, label in enumerate(names_1G):
                     adopt_samples(resampled_1G[:, i], label)
 
+                # Use the same baseline samples as the resampled objectives.
+                if fitB1 in ('BB', 'B1'):
+                    adopt_samples(BBs, 'B1')
+                    self.BB = float(self.df.loc[0, 'B1'])
+                    self.df['BB'] = self.BB
+                    if G > 1 and f'B{G}' not in names:
+                        self.df[f'B{G}'] = self.BB
+
+                # Derived centers must follow the newly adopted shared center
+                # before residuals, information criteria, plots and CSV output.
+                synchronize_tied_centers(self.df, names, G)
+
                 # recompute A1 from adopted F1, S1
                 F1 = self.df.loc[0,'F1']
                 S1 = self.df.loc[0,'S1']
                 self.df['A1'] = F1 / (S1 * 2.50662827463)
+
+                refresh_fit_diagnostics(self, names, G)
                 
                 n = len(self.gmodel.x)
                 # G=1: residuals from adopted 1G parameters
@@ -145,15 +234,9 @@ class ResamplingMixin:
                 logl_XG = -0.5 * np.sum((residuals_XG / self.e_y)**2 + np.log(2*np.pi*self.e_y**2))
                 self.df[f'AIC{G}'], self.df[f'BIC{G}'], self.df[f'AICc{G}'] = compute_aic_bic_aicc(logl_XG, npars, n)
 
-            for ii in range(npars):
-                for jj in range(ii+1,npars):
-                    # colname = f'dcor_{names[ii]}{names[jj]}'
-                    # dcorr = dcor_trimmed(resampled[:, ii], resampled[:, jj])
-                    # self.df_params[colname] = dcorr
-                    xx = resampled[:, ii]
-                    yy = resampled[:, jj]
-                    xx,yy = trim_outlier_mahalanobis(xx,yy)
-                    self.df_params[f'rs_{names[ii]}{names[jj]}'],self.df_params[f'p_rs_{names[ii]}{names[jj]}'] = spearmanr(xx,yy)
+            fill_correlation_diagnostics(
+                self.df_params, names, resampled,
+                enabled=getattr(self, 'correlation_diagnostics', False))
                     
             
 
@@ -181,6 +264,9 @@ class ResamplingMixin:
             if G==2:
                 self.df_params['sn']    = self.df.loc[0,'S21']
                 self.df_params['sb']    = self.df.loc[0,'S22']
+                self.df_params['sn/S1'] = self.df_params['sn']/self.df.loc[0,'S1']
+                self.df_params['sb/S1'] = self.df_params['sb']/self.df.loc[0,'S1']
+                self.df_params['sn/sb'] = self.df_params['sn']/self.df_params['sb']
                 self.df_params['An']    = self.df.loc[0,'F21']
                 self.df_params['Ab']    = self.df.loc[0,'F22']
                 self.df_params['At']    = self.df.loc[0,'F21'] + self.df.loc[0,'F22']
@@ -195,16 +281,23 @@ class ResamplingMixin:
                 Abs = resampled[:, idx(names,'F22')]
                 Ats = Ans + Abs
                 
-                self.df_params['e-_sn'],self.df_params['e+_sn'] = error_lower_upper(sns)
-                self.df_params['e-_sb'],self.df_params['e+_sb'] = error_lower_upper(sbs)
+                self.df_params['e-_sn'],self.df_params['e+_sn']       = error_lower_upper(sns)
+                self.df_params['e-_sb'],self.df_params['e+_sb']       = error_lower_upper(sbs)
+                self.df_params['e-_sn/S1'],self.df_params['e+_sn/S1'] = error_lower_upper(sns/S1s)
+                self.df_params['e-_sb/S1'],self.df_params['e+_sb/S1'] = error_lower_upper(sbs/S1s)
+                self.df_params['e-_sn/sb'],self.df_params['e+_sn/sb'] = error_lower_upper(sns/sbs)
                 
-                self.df_params['e-_An'],self.df_params['e+_An'] = error_lower_upper(Ans)
-                self.df_params['e-_Ab'],self.df_params['e+_Ab'] = error_lower_upper(Abs)
-                self.df_params['e-_At'],self.df_params['e+_At'] = error_lower_upper(Ats)
+                self.df_params['e-_An'],self.df_params['e+_An']       = error_lower_upper(Ans)
+                self.df_params['e-_Ab'],self.df_params['e+_Ab']       = error_lower_upper(Abs)
+                self.df_params['e-_At'],self.df_params['e+_At']       = error_lower_upper(Ats)
                 self.df_params['e-_An/At'],self.df_params['e+_An/At'] = error_lower_upper(Ans/Ats)
                 self.df_params['e-_Ab/At'],self.df_params['e+_Ab/At'] = error_lower_upper(Abs/Ats)
 
                 self.df_params['tension_S21S22'] = calc_tension(resampled[:,iS21],resampled[:,iS22])
+                
+                self.df_params['SNR2'] = self.df.loc[0,'SNR2']
+                self.df_params['SNR21'] = self.df.loc[0,'SNR21']
+                self.df_params['SNR22'] = self.df.loc[0,'SNR22']
                 
             if G==3:
                 self.df_params['sn'] = self.df.loc[0,'S31']
@@ -306,9 +399,10 @@ class ResamplingMixin:
         # if np.any(np.isnan(guess)):
         #     raise ValueError(f"{self.header_printmsg} NaN in guess parameters for resampling.")
 
-        flat_samples = self.sampler.get_chain(discard=self.burnin,thin=self.thin,flat=True)
+        chain_samples = self.sampler.get_chain(discard=self.burnin,thin=self.thin,flat=False)
         # rdm_indices  = np.random.choice(flat_samples.shape[0], nsample, replace=True)
-        nflats = flat_samples.shape[0]
+        chain_walkers = chain_samples.shape[1]
+        nflats = chain_samples.shape[0] * chain_walkers
             
         resampled    = np.full((nsample, npars_3G), np.nan, dtype=float)
         resampled_1G = np.full((nsample, len(names_1G)), np.nan, dtype=float)
@@ -318,7 +412,7 @@ class ResamplingMixin:
         
         yy   = self.y
         leny = len(yy)
-        noise_matrix = np.random.choice(residuals_orig, size=(nsample, leny), replace=True)
+        noise_rows = residual_noise_rows(residuals_orig, nsample, leny)
         
         V1,S1,B1 = self.df.loc[0,['V1','S1','B1']]
         
@@ -329,21 +423,24 @@ class ResamplingMixin:
                 BB = makefit_bg_linefree_njit(xx, y_w_noise, e_y, V1, S1, B1)
                 gmodel_resample_1G.BB = BB
                 gmodel_resample_XG.BB = BB
-                res_1G = minimize(gmodel_resample_1G.log_prob_resample, guess_1G, args=(y_w_noise), method=method_minimize)
-                res_XG = minimize(gmodel_resample_XG.log_prob_resample, guess_XG, args=(y_w_noise), method=method_minimize)
+                res_1G = minimize(gmodel_resample_1G.log_prob_resample, guess_1G, args=(y_w_noise, BB), method=method_minimize)
+                res_XG = minimize(gmodel_resample_XG.log_prob_resample, guess_XG, args=(y_w_noise, BB), method=method_minimize)
                 return res_1G, res_XG
 
         elif fitB1 == 'B1':
             self.fit_params_1G['B1']='free'
-            gmodel_1G_Bfree,_ = self.prep_1GFIT()
-            guess_1G_Bfree    = self.df.loc[0,['F1','V1','S1','B1']]
+            try:
+                gmodel_1G_Bfree,_ = self.prep_1GFIT()
+            finally:
+                self.fit_params_1G['B1']='B1'
+            guess_1G_Bfree = self.df.loc[0, ['F1','V1','S1','B1']].to_numpy(dtype=np.float64)
             def iter_resample(y_w_noise, guess_XG):
-                res_1G_Bfree = minimize(   gmodel_1G_Bfree.log_prob_resample, guess_1G_Bfree, args=(y_w_noise,), method=method_minimize)
-                B1 = res_1G_Bfree.x[3]
+                B1 = fit_resampled_baseline(gmodel_1G_Bfree, guess_1G_Bfree,
+                                           y_w_noise, method_minimize)
                 gmodel_resample_1G.BB = B1
                 gmodel_resample_XG.BB = B1
-                res_1G       = minimize(gmodel_resample_1G.log_prob_resample, guess_1G, args=(y_w_noise), method=method_minimize)
-                res_XG       = minimize(gmodel_resample_XG.log_prob_resample, guess_XG, args=(y_w_noise), method=method_minimize)
+                res_1G       = minimize(gmodel_resample_1G.log_prob_resample, guess_1G, args=(y_w_noise, B1), method=method_minimize)
+                res_XG       = minimize(gmodel_resample_XG.log_prob_resample, guess_XG, args=(y_w_noise, B1), method=method_minimize)
                 return res_1G, res_XG
             self.fit_params_1G['B1']='B1'
 
@@ -356,13 +453,15 @@ class ResamplingMixin:
         funs = np.zeros(nsample)
         BBs  = np.zeros(nsample)
         self.df_params['Nsample'] = 5000
-        
+        width_history = []
+
         for j in range(nsample):
+            noise = next(noise_rows)
             while True:
-                y_w_noise = yy + noise_matrix[j,:]
+                y_w_noise = yy + noise
                 rdm_index = np.random.choice(nflats)
                 
-                guess_XG = flat_samples[rdm_index,:]
+                guess_XG = chain_samples[rdm_index // chain_walkers, rdm_index % chain_walkers]
                 
                 res_1G,res_XG = iter_resample(y_w_noise, guess_XG)
                 if G==1: break
@@ -379,9 +478,10 @@ class ResamplingMixin:
                 eta = datetime.timedelta(seconds=int((nsample - j) / (500 / (timef - timei))))
                 self.writestat(f"{self.stat} {j} {eta}")
                 
-                if j>1000:
-                    converged = check_converged_resampling(resampled[:j,:], j, npars_3G)
-                    if converged: 
+                if j>=1000:
+                    width_history.append(compute_widths(resampled, j, npars_3G))
+                    converged = check_converged_resampling(width_history)
+                    if converged:
                         resampled    = resampled[   :j,:]
                         resampled_1G = resampled_1G[:j,:]
                         BBs          = BBs[:j]
@@ -396,6 +496,11 @@ class ResamplingMixin:
 
         if pbar is not None:
             pbar.close()
+
+        # Release the replay batch/view before allocating physical samples and
+        # constructing potentially large diagnostic figures.
+        noise_rows.close()
+        del noise_rows, chain_samples
             
         
         # if np.all((resampled - guess[None,:])==0):
@@ -414,6 +519,7 @@ class ResamplingMixin:
 
         self.good_resample = True
         self.df_params["Reliable"] = "Y"
+        self.checkpoint_plot_state(self.gmodel)
         self.make_atlas(cleanup=True)
         
         return

@@ -10,9 +10,9 @@ import numpy as np
 from scipy.stats import gaussian_kde, spearmanr
 
 from ..gmodel import Gmodel, map_params
-from ..subroutines import (gaussian_area, idx, sort_outliers,
-                           trim_outlier_mahalanobis, compute_aic_bic_aicc,
-                           compute_waic)
+from ..subroutines import (compute_aic_bic_aicc, compute_waic, fill_snr,
+                           gaussian_area, idx, kde_map, sort_outliers,
+                           trim_outlier_mahalanobis)
 
 
 class EvaluationMixin:
@@ -27,6 +27,9 @@ class EvaluationMixin:
         def fill_free_params(statistics):
             burnin = self.burnin
             thin = self.thin
+            
+            self.df['Nwalks'] = sampler.iteration
+            self.df['Burnin'] = burnin
             
             # 1. Get the log-probs first to find the MAP index
             # We do this before thinning to find the absolute best point found
@@ -49,11 +52,7 @@ class EvaluationMixin:
                 
                 if statistics == "MAP":
                     try:
-                        kde = gaussian_kde(samples)
-                        x_grid = np.linspace(samples.min(), samples.max(), 1000)
-                        kde_values = kde.evaluate(x_grid)
-                        marginal_map = x_grid[np.argmax(kde_values)]
-                        self.df[label] = marginal_map
+                        self.df[label] = kde_map(samples)
                     except np.linalg.LinAlgError:
                         self.df[label] = p50
                     
@@ -78,18 +77,19 @@ class EvaluationMixin:
                     SS = self.df.loc[0,f'S{Gg}']
                     FF = AA*SS*2.50662827463
                     self.df[f'F{Gg}'] = FF
-                    
+            
             npars = len(names)
-            for ii in range(npars):
-                for jj in range(ii+1,npars):
-                    xx = flat_deconstr[:, ii]
-                    yy = flat_deconstr[:, jj]
-                    xx,yy = trim_outlier_mahalanobis(xx,yy)
-                    self.df[f'rs_{names[ii]}{names[jj]}'],self.df[f'p_rs_{names[ii]}{names[jj]}'] = spearmanr(xx,yy)
-                    # colname = f'dcor_{names[ii]}{names[jj]}'
-                    # dcorr = dcor_trimmed(flat_deconstr[:, ii], flat_deconstr[:, jj])
-                    # self.df[colname] = dcorr
-                    
+            # for ii in range(npars):
+            #     for jj in range(ii+1,npars):
+            #         xx = flat_deconstr[:, ii]
+            #         yy = flat_deconstr[:, jj]
+            #         xx,yy = trim_outlier_mahalanobis(xx,yy)
+            #         self.df[f'rs_{names[ii]}{names[jj]}'],self.df[f'p_rs_{names[ii]}{names[jj]}'] = spearmanr(xx,yy)
+            #         # colname = f'dcor_{names[ii]}{names[jj]}'
+            #         # dcorr = dcor_trimmed(flat_deconstr[:, ii], flat_deconstr[:, jj])
+            #         # self.df[colname] = dcorr
+                
+                        
             # self.df['WAIC'] = compute_waic(full_log_probs)
             
             log_l_max = full_log_probs.max()
@@ -121,30 +121,15 @@ class EvaluationMixin:
                     self.df['B3'] = self.df['BB'][0] if 'BB' in self.df else self.df['B1'][0]
             return G
                     
-        def fill_SNR(G):
-            residuals        = self.get_residuals(G=G)
-            self.df[f"N{G}"] = float(np.sqrt(np.mean(residuals**2)))
-            if G==1:
-                A1,N1 = self.df.loc[0,['A1','N1']]
-                self.df['SNR1'] = A1/N1
-            else:
-                As = self.df.loc[0,[f'A{G}{g}' for g in range(1,G+1)]]
-                                
-                NN = self.df.loc[0,f'N{G}']
-                self.df[f'SNR{G}'] = np.sum(As) / NN
-                
-                for g in range(1,G+1):
-                    Ag = self.df.loc[0,f'A{G}{g}']
-                    self.df[f'SNR{G}{g}'] = Ag / NN
-            return    
-                    
         names = gmodel.names_param
         
         self.sampler = sampler
         
         fill_free_params(self.statistics)
         G = fill_fixed_params()
-        fill_SNR(G)
+        
+        residuals        = self.get_residuals(G=G)
+        fill_snr(self.df, residuals, G)
 
         return
 

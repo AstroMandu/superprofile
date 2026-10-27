@@ -2,40 +2,9 @@ import math
 
 import numpy as np
 from numba import njit
+from .logls import log_L_1G_njit,log_L_2G_njit,log_L_2G_V22x_njit,log_L_3G_V32xV33x_njit
 
 INV_SQ2PI = 0.3989422804014327
-
-@njit(fastmath=True, cache=True, inline='always')
-def log_L_1G_njit(x, y, inv_e_y, A1, V1, exp1, B1):
-    acc = 0.0
-    for i in range(x.shape[0]):
-        dx_sq = (x[i] - V1) * (x[i] - V1)
-        r = (y[i] - B1 - A1 * math.exp(dx_sq * exp1)) * inv_e_y[i]
-        acc += r * r
-    return -0.5 * acc
-
-@njit(fastmath=True, cache=True, inline='always')
-def log_L_2G_V22x_njit(x, y, inv_e_y, A21, A22, V2, exp1, exp2, B2):
-    acc = 0.0
-    for i in range(x.shape[0]):
-        dx_sq = (x[i] - V2) * (x[i] - V2)
-        r = (y[i] - B2
-                   - A21 * math.exp(dx_sq * exp1)
-                   - A22 * math.exp(dx_sq * exp2)) * inv_e_y[i]
-        acc += r * r
-    return -0.5 * acc
-
-@njit(fastmath=True, cache=True, inline='always')
-def log_L_3G_V32xV33x_njit(x, y, inv_e_y, A31, A32, A33, V3, exp1, exp2, exp3, B3):
-    acc = 0.0
-    for i in range(x.shape[0]):
-        dx_sq = (x[i] - V3) * (x[i] - V3)
-        r = (y[i] - B3
-             - A31 * math.exp(dx_sq * exp1)
-             - A32 * math.exp(dx_sq * exp2)
-             - A33 * math.exp(dx_sq * exp3)) * inv_e_y[i]
-        acc += r * r
-    return -0.5 * acc
 
 @njit(fastmath=True, cache=True, inline='always')
 def log_prob_1G_njit_linear(xx,yy,inv_e_y,
@@ -89,22 +58,22 @@ def log_prob_1G_B1x_njit_linear(xx,yy,inv_e_y,
 
 @njit(fastmath=True, cache=True, inline='always')
 def log_prob_2G_V22xB2x_njit_linear(xx,yy,inv_e_y,
-                                    uF21,uF22,uV2,uS21,uS22,B2,
-                                    lowF21,spnF21,
-                                    lowF22,spnF22,
+                                    uA21,uA22,uV2,uS21,uS22,B2,
+                                    lowA21,spnA21,
+                                    lowA22,spnA22,
                                     lowV,spnV,
                                     lowS21,spnS21,
                                     loghihS22,deltav):
     
-    if (uF21<0.0 or uF21>1.0 or
-        uF22<0.0 or uF22>1.0 or
+    if (uA21<0.0 or uA21>1.0 or
+        uA22<0.0 or uA22>1.0 or
         uV2 <0.0 or uV2 >1.0 or
         uS21<0.0 or uS21>1.0 or
         uS22<0.0 or uS22>1.0): return -np.inf
     
-    F21 = lowF21 + spnF21 * uF21
-    F22 = lowF22 + spnF22 * uF22
-    V2  = lowV + spnV  * uV2
+    A21 = lowA21 + spnA21 * uA21
+    A22 = lowA22 + spnA22 * uA22
+    V2  = lowV   + spnV   * uV2
     
     S21 = lowS21 + spnS21 * uS21
     if S21+deltav<=0: return -math.inf
@@ -114,8 +83,6 @@ def log_prob_2G_V22xB2x_njit_linear(xx,yy,inv_e_y,
     
     invS21 = 1.0/S21
     invS22 = 1.0/S22
-    A21 = F21*invS21 * INV_SQ2PI
-    A22 = F22*invS22 * INV_SQ2PI
     
     exp1 = -0.5 * invS21 * invS21
     exp2 = -0.5 * invS22 * invS22
@@ -123,25 +90,63 @@ def log_prob_2G_V22xB2x_njit_linear(xx,yy,inv_e_y,
     logl = log_L_2G_V22x_njit(xx,yy,inv_e_y,A21,A22,V2,exp1,exp2,B2) + logJ_S22
     return logl
 
+
+@njit(fastmath=True, cache=True, inline='always')
+def log_prob_2G_B2x_njit_linear(xx,yy,inv_e_y,
+                                    uA21,uA22,uV21,uV22,uS21,uS22,B2,
+                                    lowA21,spnA21,
+                                    lowA22,spnA22,
+                                    lowV21,spnV21,
+                                    lowV22,spnV22,
+                                    lowS21,spnS21,
+                                    loghihS22,deltav):
+    
+    if (uA21<0.0 or uA21>1.0 or
+        uA22<0.0 or uA22>1.0 or
+        uV21<0.0 or uV21>1.0 or
+        uV22<0.0 or uV22>1.0 or
+        uS21<0.0 or uS21>1.0 or
+        uS22<0.0 or uS22>1.0): return -np.inf
+    
+    A21 = lowA21 + spnA21 * uA21
+    A22 = lowA22 + spnA22 * uA22
+    V21 = lowV21 + spnV21 * uV21
+    V22 = lowV22 + spnV22 * uV22
+
+    S21 = lowS21 + spnS21 * uS21
+    if S21+deltav<=0: return -math.inf
+    loglowS22 = math.log(S21+deltav)
+    S22 = math.exp(loglowS22 + (loghihS22-loglowS22)*uS22)
+    logJ_S22 = math.log(S22) + (loghihS22 - loglowS22)
+    
+    invS21 = 1.0/S21
+    invS22 = 1.0/S22
+    
+    exp1 = -0.5 * invS21 * invS21
+    exp2 = -0.5 * invS22 * invS22
+    
+    logl = log_L_2G_njit(xx,yy,inv_e_y,A21,A22,V21,V22,exp1,exp2,B2) + logJ_S22
+    return logl
+
 @njit(fastmath=True, cache=True, inline='always')
 def log_prob_2G_V22x_njit_linear(xx,yy,inv_e_y,
-                                    uF21,uF22,uV2,uS21,uS22,uB2,
-                                    lowF21,spnF21,
-                                    lowF22,spnF22,
+                                    uA21,uA22,uV2,uS21,uS22,uB2,
+                                    lowA21,spnA21,
+                                    lowA22,spnA22,
                                     lowV,spnV,
                                     lowS21,spnS21,
                                     loghihS22,
                                     lowB,spnB,deltav):
     
-    if (uF21<0.0 or uF21>1.0 or
-        uF22<0.0 or uF22>1.0 or
+    if (uA21<0.0 or uA21>1.0 or
+        uA22<0.0 or uA22>1.0 or
         uV2 <0.0 or uV2 >1.0 or
         uS21<0.0 or uS21>1.0 or
         uS22<0.0 or uS22>1.0 or
         uB2 <0.0 or uB2 >1.0): return -np.inf
     
-    F21 = lowF21 + spnF21 * uF21
-    F22 = lowF22 + spnF22 * uF22
+    A21 = lowA21 + spnA21 * uA21
+    A22 = lowA22 + spnA22 * uA22
     V2  = lowV + spnV  * uV2
     B2  = lowB + spnB  * uB2
     
@@ -153,8 +158,6 @@ def log_prob_2G_V22x_njit_linear(xx,yy,inv_e_y,
     
     invS21 = 1.0/S21
     invS22 = 1.0/S22
-    A21 = F21*invS21 * INV_SQ2PI
-    A22 = F22*invS22 * INV_SQ2PI
     
     exp1 = -0.5 * invS21 * invS21
     exp2 = -0.5 * invS22 * invS22

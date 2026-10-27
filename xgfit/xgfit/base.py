@@ -27,15 +27,13 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from ..gmodel import Gmodel
+from ..gmodel     import Gmodel
 from .atlas       import AtlasMixin
 from .diagnostics import DiagnosticsMixin
 from .evaluation  import EvaluationMixin
 from .fitting     import FittingMixin
 from .resampling  import ResamplingMixin
-from .cleanup import CleanupMixin
-
-
+from .cleanup     import CleanupMixin
 
 class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
               FittingMixin, AtlasMixin, CleanupMixin):
@@ -93,6 +91,10 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         self.path_plot = Path(path_plot) if path_plot is not None else None
         self.path_temp = Path(path_temp) if path_temp is not None else None
         self.plot_autocorr = bool(plot_autocorr)
+        self.intermediate_plots = False
+        self.correlation_diagnostics = False
+        self.walk_plot_max_steps = 1000
+        self.walk_plot_max_walkers = 30
         
         if self.path_plot.exists()==False: os.makedirs(self.path_plot)
         if self.path_temp.exists()==False: os.makedirs(self.path_temp)
@@ -178,7 +180,7 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
     # -----------------------------
     def _init_main_df(self) -> pd.DataFrame:
         base_cols = [
-            "Nsample", "Burnin",
+            "Nwalks", "Burnin",
             "SNR1", "SNR2", "SNR3",
             "N1", "N2", "N3",
             "B1", "A1", "V1", "S1",
@@ -268,8 +270,8 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         # Bounds from spectral resolution & bandwidth
         self.dispmin = (self.chansep / 2.355)
         # self.dispmin = 2.0
-        # self.dispmax = 999 #self.bandwidth / 2.355
         self.dispmax = 99 #self.bandwidth / 2.355
+        # self.dispmax = 99 #self.bandwidth / 2.355
 
         if (self.dispmax - self.dispmin) < 2:
             self.df_params["Reliable"] = "disprng"
@@ -309,7 +311,7 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         self.makefit_emcee(G=2,maxiter=50000,makefit_guess=False)
         redo_2GFIT, _ = self.evaluate_2GFIT()
         if redo_2GFIT:
-            self.make_atlas(cleanup=True)
+            self.make_atlas(cleanup=True, intermediate=True)
             self.makefit_emcee(G=2,maxiter=50000,makefit_guess=False)
         self.resample(2,self.nsample_resample,self.pbar_resample)
         
@@ -352,12 +354,12 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         redo_3GFIT, goto_2GFIT = self.evaluate_3GFIT()
         
         if redo_3GFIT:
-            self.make_atlas(cleanup=True)
+            self.make_atlas(cleanup=True, intermediate=True)
             self.makefit_emcee(G=3,maxiter=100000,makefit_guess=False)
             _, goto_2GFIT = self.evaluate_3GFIT()
         
         if goto_2GFIT:
-            self.make_atlas(cleanup=True)
+            self.make_atlas(cleanup=True, intermediate=True)
             self.do_2GFIT()
             return
         
@@ -365,7 +367,7 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         if self.truth_from_resampling:
             redo_3GFIT, goto_2GFIT = self.evaluate_3GFIT()
             if goto_2GFIT:
-                self.make_atlas(cleanup=True)
+                self.make_atlas(cleanup=True, intermediate=True)
                 self.do_2GFIT()
                 return
         return
@@ -374,6 +376,20 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
     # Top-level run
     # -----------------------------
     def run(self, suffix: str = "", nsample_resample: int = 1499, pbar_resample: bool = False, NGFIT='2GFIT') -> None:
+        self._plot_checkpoint = None
+        try:
+            return self._run(suffix, nsample_resample, pbar_resample, NGFIT)
+        except Exception:
+            # Diagnostics must never replace the original fit exception.
+            try:
+                self.make_error_atlas()
+            except Exception as error:
+                print(f'[plot] Could not save failure diagnostics: {error}', flush=True)
+            raise
+        finally:
+            self._plot_checkpoint = None
+
+    def _run(self, suffix: str = "", nsample_resample: int = 1499, pbar_resample: bool = False, NGFIT='2GFIT') -> None:
         
         self.suffix = suffix
         self.nsample_resample = int(nsample_resample)
@@ -385,16 +401,24 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         
         self.check_config()
         if not self.check_stacked():
+            self.removestat()
+            self.cleanup()
             return
         if not self.check_list_disp():
+            self.removestat()
+            self.cleanup()
             return
         
         del self.dict_stacked
         gc.collect()
+        
+        res_1G = self.makefit_1G_minimize(self.x, self.y, self.e_y)
+        self.df.loc[0,['B1','V1','S1']] = float(res_1G["B1"]), float(res_1G["V1"]), float(res_1G["S1"])
+        
+        self.limit_range(multiplier_disp=10, initial_fit=res_1G)
+        self.makefit_bg_linefree(multiplier_mask_S1=5)
 
         # self.limit_range(multiplier_disp=7)
-        self.limit_range(multiplier_disp=10)
-        
         # self.symmeterise_x()
         
         # del self.df_stacked
@@ -409,14 +433,17 @@ class XGFIT(DiagnosticsMixin, EvaluationMixin, ResamplingMixin,
         # self.limit_range(multiplier_disp=9)
         
         self.evaluate_1GFIT()
-        self.make_atlas(gmodel=self.gmodel_1G, cleanup=True)
+        self.checkpoint_plot_state(self.gmodel_1G, include_samples=False)
+        self.make_atlas(gmodel=self.gmodel_1G, cleanup=True,
+                        intermediate=self.good_1GFIT)
                 
         if not self.good_1GFIT:
             self.removestat()
+            self.cleanup()
             return
         
         #1
-        self.makefit_bg_linefree(multiplier_mask_S1=5)
+        
         # self.fit_params_1G['B1']='free'
         # self.fit_params_2G['B2']='free'
         # self.fit_params_3G['B3']='free'

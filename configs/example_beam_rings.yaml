@@ -1,0 +1,49 @@
+# From pipeline/: python3 pipe_superprofile.py --config ../configs/example_beam_rings.yaml
+# Add --dry-run to evaluate ring selections without writing masks or results.
+preset: viva-test
+data_dir: /home/mskim/workspace/research/data/VIVA/VIVA_test
+# galaxies: [VCC307]  # Optional subset; omit for all galaxies.
+output_dir: null  # null: per-galaxy output; a path: shared output override.
+output_dir_name: beam_rings_2GFIT_HERMOM  # Under each cube directory/NGFIT/.
+workers: 4
+progress: terminal  # terminal: live table; file: Plotfit_stat.csv.
+overwrite: false
+
+fit:
+  correlation_diagnostics: false  # true: robust pairwise Spearman diagnostics.
+  intermediate_plots: false  # Keep final/error plots; skip intermediate atlases.
+  walk_plot_max_steps: 1000  # Display only; fitting samples are unchanged.
+  walk_plot_max_walkers: 30
+  mode: HERMOM  # MOM, HER, HERMOM; filling-factor stopping does not support BAY.
+  model: 2GFIT  # 2GFIT or 3GFIT.
+  resamples: 5000
+  guess_from_whole: true  # Requires whole below or existing local whole results.
+
+masks:
+  cleanup_after_run: true  # true: delete used masks after success; false: keep masks.
+  regions: [whole, ring]
+  catalog: /home/mskim/workspace/research/data/catalog/diameters_NEDLVS.csv
+  # Beam rings currently use this optical ellipse's center, PA and axis ratio.
+  # multipliers and legacy ring_width do not control this new ring mode.
+  rings:
+    beam_fwhm: mean  # mean: sqrt(BMAJ*BMIN); major: larger axis; minor: smaller axis.
+    width_beams: 1.0  # Positive width in beam FWHM along the semi-major axis.
+    start_beams: 0.0  # Nonnegative inner edge; zero includes a central ellipse.
+    final_ring: drop  # Radius mode: drop incomplete last ring, or clip to limit.
+    stop:
+      mode: radius  # radius or filling_factor; choose one stopping mode.
+      radius: Ropt  # Radius mode: Ropt (NEDLVS Diam/2) or beam (selected FWHM).
+      multiplier: 1.0  # Radius mode: outer limit = multiplier * radius unit.
+      # For filling-factor stopping, change mode above to filling_factor.
+      # The following options apply only to that mode; radius/multiplier are ignored.
+      min_fraction: 0.5  # [0,1]; stop below this value; 0 stops at zero usable pixels.
+      consecutive_below: 1  # Positive count; 2 tolerates an isolated low-fill ring.
+      include_trigger_ring: false  # false: exclude the final low-fill sequence.
+      # true: retain its final trigger ring, excluding earlier rings in that sequence.
+      # Earlier isolated low-fill rings remain when followed by sufficient filling.
+      # Empty rings are never fitted, even when include_trigger_ring is true.
+      # Filling = eligible spatial pixels / all annulus pixels, including outside image.
+      # Eligibility matches stacking: finite velocity plus its dispersion validity cut;
+      # HERMOM uses moment-map fallback. No additional moment-0 threshold is imposed.
+      # A central hole may stop at ring zero; start_beams can skip that central area.
+      # ring_geometry.csv records evaluated rings, filling fractions and decisions.

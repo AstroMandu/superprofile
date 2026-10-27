@@ -60,8 +60,8 @@ def colorbar(img, spacing=0, cbarwidth=0.01, orientation='vertical', pos='right'
             cax = fig.add_axes([ax.get_position().x0, ax.get_position().y0-spacing-cbarwidth, ax.get_position().width, cbarwidth])
     
     if(len(ticks)!=1):
-        cbar = plt.colorbar(img, cax=cax, orientation=orientation, ticks=ticks)
-    else: cbar = plt.colorbar(img, cax=cax, orientation=orientation)
+        cbar = fig.colorbar(img, cax=cax, orientation=orientation, ticks=ticks)
+    else: cbar = fig.colorbar(img, cax=cax, orientation=orientation)
     cbar.set_label(label=label, fontsize=fontsize)
     return cbar, cax
 
@@ -186,7 +186,7 @@ def initdisplay():
         cross = dict_plot['ax1'].scatter(dict_params['cursor_xy'][0], dict_params['cursor_xy'][1], marker='+', color='white', s=100)
         cross.set_path_effects([PathEffects.withStroke(linewidth=5, foreground='black')])
     if 'cax' in dict_plot:
-        del dict_plot['cax']
+        dict_plot['cax'].remove()
     _,dict_plot['cax'] = colorbar(dict_plot['img1'], cbarwidth=0.03)
     dict_plot['canvas1'].draw()
 
@@ -335,7 +335,6 @@ root.title(title)
 # root.bind("<Return>", lambda x: updatedisplay())
 root.resizable(False, False)
 
-
 menubar = Menu(root)
 
 menu_1 = Menu(menubar, tearoff=0)
@@ -348,9 +347,9 @@ menubar.add_cascade(label="Load", menu=menu_1)
 menubar.add_cascade(label="Option", menu=menu_2)
 
 dict_obj['frame_master'] = Frame(root)
-frame_L = Frame(dict_obj['frame_master'], height=500, width=500, bg='white')
-frame_M = Frame(dict_obj['frame_master'], height=500, width=50, bg='white')
-frame_R = Frame(dict_obj['frame_master'], height=500, width=500, bg='white')
+frame_L = Frame(dict_obj['frame_master'],  height=500, width=500, bg='white')
+frame_M = Frame(dict_obj['frame_master'],  height=500, width=50, bg='white')
+frame_R = Frame(dict_obj['frame_master'],  height=500, width=500, bg='white')
 dict_obj['frame_display'] = Frame(frame_L, height=500, width=500, bg='white')
 dict_obj['frame_display'].pack()
 
@@ -419,6 +418,9 @@ def tracecursor(event):
             cursor_xy = (round(event.xdata),round(event.ydata))
             # print(cursor_x, cursor_y)
 
+            if not (0<=cursor_xy[0]<dict_data['imsize'][1] and 0<=cursor_xy[1]<dict_data['imsize'][0]):
+                return
+
             if(dict_params['cursor_xy']==cursor_xy[0] and dict_params['cursor_xy'][1]==cursor_xy[1]):
                 return
             else:
@@ -458,8 +460,13 @@ def zoom(event):
 
 
 
+def _quit():
+    root.quit()
+    root.destroy()
+
 root.config(menu=menubar)
 root.bind('f', fix_cursor)
+root.protocol("WM_DELETE_WINDOW", _quit)
 # print(sys.argv)
 if(len(sys.argv)>1):
     readdata(path_cube=sys.argv[1], path_hermite=sys.argv[2])

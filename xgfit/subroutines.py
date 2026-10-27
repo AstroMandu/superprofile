@@ -1,10 +1,9 @@
 import math
 
 import numpy as np
+from astropy.stats import mad_std, sigma_clip
 from numba import njit
 from scipy.stats import f, gaussian_kde
-from .gmodel.numeric import sigmoid01_exp, softplus, inv_softplus
-import dcor
 
 S_EPS  = np.float64(1e-12)
 S_MAX = np.float64(1e3) 
@@ -59,24 +58,24 @@ def get_mode(dist):
     return mode
 
 
-def sort_outliers(array, weight=1.5, return_index=False, only_higher=False):
+# def sort_outliers(array, weight=1.5, return_index=False, only_higher=False):
     
-    array = array[np.isfinite(array)]
+#     array = array[np.isfinite(array)]
     
-    perc25, perc75 = np.nanpercentile(array, [25,75])
-    IQR = perc75-perc25
+#     perc25, perc75 = np.nanpercentile(array, [25,75])
+#     IQR = perc75-perc25
     
-    end_lower = perc25 - IQR*weight
-    end_highr = perc75 + IQR*weight
+#     end_lower = perc25 - IQR*weight
+#     end_highr = perc75 + IQR*weight
     
-    if only_higher:
-        argwheres = np.argwhere(array<end_highr).flatten()
-    else:
-        argwheres = np.argwhere((array>end_lower) & (array<end_highr)).flatten()
+#     if only_higher:
+#         argwheres = np.argwhere(array<end_highr).flatten()
+#     else:
+#         argwheres = np.argwhere((array>end_lower) & (array<end_highr)).flatten()
     
-    if return_index:
-        return array[argwheres], argwheres
-    return array[argwheres]
+#     if return_index:
+#         return array[argwheres], argwheres
+#     return array[argwheres]
 
 
 def idx(names, keys):
@@ -180,22 +179,37 @@ def clip_guess(guess, gmodel):
 #     corr = dcor.distance_correlation(x,y)
 #     return corr
 
-def trim_outlier_mahalanobis(x,y,trim=5):
-    m = np.isfinite(x) & np.isfinite(y)
-    x, y = x[m], y[m]
+# def trim_outlier_mahalanobis(x,y,trim=5):
+#     m = np.isfinite(x) & np.isfinite(y)
+#     x, y = x[m], y[m]
     
-    data = np.column_stack([x, y])
-    center = np.median(data, axis=0)       # robust center
-    cov = np.cov(data.T)
-    cov_inv = np.linalg.pinv(cov)
+#     data = np.column_stack([x, y])
+#     center = np.median(data, axis=0)       # robust center
+#     cov = np.cov(data.T)
+#     cov_inv = np.linalg.pinv(cov)
     
-    diff = data - center
-    # Mahalanobis distance squared for each point
-    dist2 = np.einsum('ij,jk,ik->i', diff, cov_inv, diff)
+#     diff = data - center
+#     # Mahalanobis distance squared for each point
+#     dist2 = np.einsum('ij,jk,ik->i', diff, cov_inv, diff)
     
-    threshold = np.percentile(dist2, 100 - trim)
-    keep = dist2 <= threshold
-    return x[keep], y[keep]
+#     threshold = np.percentile(dist2, 100 - trim)
+#     keep = dist2 <= threshold
+#     return x[keep], y[keep]
+
+def trim_outlier_mahalanobis(x, y, trim=5):
+    from sklearn.covariance import MinCovDet
+    try:
+        m = np.isfinite(x) & np.isfinite(y)
+        x, y = x[m], y[m]
+        data = np.column_stack([x, y])
+        
+        mcd = MinCovDet().fit(data)
+        dist2 = mcd.mahalanobis(data)
+        threshold = np.percentile(dist2, 100 - trim)
+        keep = dist2 <= threshold
+        return x[keep], y[keep]
+    except ValueError:
+        return x, y
 
 
 @njit(fastmath=True, cache=True, inline='always')
@@ -215,21 +229,31 @@ def get_interval_width(arr):
     return tmp[idx84] - tmp_lower[idx16]
 
 @njit(fastmath=True, cache=True)
-def check_converged_resampling(samples, iters, nparams):
-    idx_f = int(0.2 * iters)
-    idx_l = int(0.8 * iters)
-    
+def compute_widths(samples, iters, nparams):
+    """Interval width of each parameter using all samples[:iters, i]."""
+    widths = np.empty(nparams)
     for i in range(nparams):
-        param_samples = samples[:iters, i]
-        
-        err_f = get_interval_width(param_samples[:idx_f])
-        err_l = get_interval_width(param_samples[idx_l:])
-        
-        # Stability check
-        if abs(err_f - err_l) / (err_l + 1e-10) > 0.05:
-            return False
-            
-    return True
+        widths[i] = get_interval_width(samples[:iters, i])
+    return widths
+
+
+def check_converged_resampling(width_history, tol=0.05, patience=2):
+    """
+    Cauchy-style stopping criterion: converged once the per-parameter
+    interval width has changed by less than `tol` (relative) across
+    `patience` consecutive checkpoints in a row.
+
+    width_history: list/array of shape (n_checkpoints, nparams), each row
+    being compute_widths() evaluated on all samples collected up to that
+    checkpoint (i.e. widths get less noisy over time, not disjoint slices
+    of one batch).
+    """
+    if len(width_history) < patience + 1:
+        return False
+
+    recent = np.asarray(width_history[-(patience + 1):])
+    rel_change = np.abs(np.diff(recent, axis=0)) / (recent[:-1] + 1e-10)
+    return bool(np.all(rel_change < tol))
 
 
 def compute_waic(log_liks):
@@ -272,3 +296,40 @@ def compute_aic_bic_aicc(logl_max, k, n):
     bic  = -2*logl_max + k*np.log(n)
     aicc = aic + 2*k*(k+1)/(n - k - 1)
     return aic, bic, aicc
+
+
+def fill_snr(df, residuals, G):
+    """Noise = robust std of fit residuals (mad_std, resistant to outlier channels).
+    SNR = summed line amplitude / noise."""
+    N = float(mad_std(residuals, ignore_nan=True))
+    df[f"N{G}"] = N
+    if G == 1:
+        df['SNR1'] = df.loc[0, 'A1'] / N
+    else:
+        As = df.loc[0, [f'A{G}{g}' for g in range(1, G + 1)]]
+        df[f'SNR{G}'] = np.sum(As) / N
+        for g in range(1, G + 1):
+            df[f'SNR{G}{g}'] = df.loc[0, f'A{G}{g}'] / N
+    return N
+
+
+def sort_outliers(array, sigma=3.0, maxiters=5):
+    array = np.asarray(array)
+    array = array[np.isfinite(array)]
+    clipped = sigma_clip(array, sigma=sigma, maxiters=maxiters,
+                          cenfunc='median', stdfunc='mad_std')
+    return clipped.compressed()   # plain ndarray of surviving values
+
+
+def kde_map(samples, npoints=1000, with_cdf=False):
+    """Posterior mode via KDE peak. If with_cdf, also return the grid/cdf
+    needed for asymmetric 1-sigma error bars around the mode."""
+    kde = gaussian_kde(samples)
+    grid = np.linspace(samples.min(), samples.max(), npoints)
+    density = kde(grid)
+    imax = np.argmax(density)
+    mode = grid[imax]
+    if not with_cdf:
+        return mode
+    cdf = np.cumsum(density) / np.sum(density)
+    return mode, grid, cdf, imax

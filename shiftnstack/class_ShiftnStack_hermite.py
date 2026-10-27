@@ -304,7 +304,9 @@ class ShiftnStack_hermite:
         yy  = yy * (u.Jy/u.beam)
         e_y = e_y * (u.Jy/u.beam)
         yy  =   yy.to(u.Jy/u.arcsec**2, equivalencies=u.beam_angular_area(self.beam)) * (self.cd*self.cd)
-        e_y = std_channel.to(u.Jy/u.arcsec**2, equivalencies=u.beam_angular_area(self.beam)) * (self.cd*self.cd) * np.sqrt(NN /((self.bM*self.bm*np.pi)/(self.cd*self.cd)))
+        pixels_per_beam = (self.beam.sr / (self.cd * self.cd).to(u.sr)).value
+        e_y = summed_flux_error(
+            std_channel.to_value(u.Jy/u.beam), NN, pixels_per_beam) * u.Jy
         e_y[np.argwhere(e_y==0)] = np.median(e_y)
         
         xx,yy,e_y = xx*np.abs(self.chansep), yy, e_y
@@ -337,7 +339,7 @@ class ShiftnStack_hermite:
     
 if __name__=='__main__':
     
-    from subroutines_shiftnstack import argfind_nearest, shifter
+    from subroutines_shiftnstack import argfind_nearest, shifter, summed_flux_error
     import pandas as pd
     from natsort import natsorted
     from run_makemask_ellipse import run_makemask as run_makemask_ellipse

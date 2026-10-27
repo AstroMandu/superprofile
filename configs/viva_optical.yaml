@@ -1,0 +1,24 @@
+preset: viva-test
+data_dir: /home/mskim/workspace/research/data/VIVA/VIVA_test
+output_dir: null
+galaxies: null
+workers: 2
+overwrite: false
+
+fit:
+  correlation_diagnostics: false  # true: robust pairwise Spearman diagnostics.
+  intermediate_plots: false  # Keep final/error plots; skip intermediate atlases.
+  walk_plot_max_steps: 1000  # Display only; fitting samples are unchanged.
+  walk_plot_max_walkers: 30
+  mode: HERMOM
+  model: 2GFIT
+  resamples: 5000
+  statistics: MEDIAN
+  initmod: 123
+  guess_from_whole: false
+
+masks:
+  cleanup_after_run: true  # true: delete used masks after success; false: keep masks.
+  regions: [inner, outer]
+  catalog: /home/mskim/workspace/research/data/catalog/diameters_NEDLVS.csv
+  multipliers: [1.0]

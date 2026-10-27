@@ -1,5 +1,4 @@
 import gc
-import io
 import os
 
 import numpy as np
@@ -7,12 +6,44 @@ import pandas as pd
 import pylab as plt
 import seaborn as sns
 from chainconsumer import Chain, ChainConsumer, Truth
+from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.collections import LineCollection
 from matplotlib.lines import Line2D
 from matplotlib.patches import Rectangle
 
 from ..gmodel.mappers import map_params
-from ..subroutines import gauss, gaussian_area, idx, sort_outliers
+from ..subroutines import gauss, gaussian_area, idx
+
+
+def select_walk_plot_samples(raw, max_steps=1000, max_walkers=30):
+    """Subsample only the display, preserving original iteration coordinates."""
+    steps = np.linspace(0, raw.shape[0] - 1, min(raw.shape[0], max_steps), dtype=int)
+    walkers = np.linspace(0, raw.shape[1] - 1, min(raw.shape[1], max_walkers), dtype=int)
+    return raw[steps[:, None], walkers[None, :], :], steps
+
+
+def paste_corner_figure(atlas, corner, bounds):
+    """Render a transparent corner directly into the atlas, then release it."""
+    try:
+        corner.patch.set_alpha(0)
+        for ax in corner.axes:
+            ax.patch.set_alpha(0)
+        canvas = FigureCanvasAgg(corner)
+        canvas.draw()
+        rgba = np.asarray(canvas.buffer_rgba())
+        # Match the tight framing of the former standalone PNG, within the canvas.
+        bbox = corner.get_tightbbox(canvas.get_renderer()).padded(
+            plt.rcParams['savefig.pad_inches'])
+        x0, y0, x1, y1 = bbox.transformed(corner.dpi_scale_trans).extents
+        height, width = rgba.shape[:2]
+        left, right = max(0, int(np.floor(x0))), min(width, int(np.ceil(x1)))
+        top, bottom = max(0, height-int(np.ceil(y1))), min(height, height-int(np.floor(y0)))
+        ax_img = atlas.add_axes(bounds)
+        # imshow copies the pixels, so the corner renderer is not retained.
+        ax_img.imshow(rgba[top:bottom, left:right])
+        ax_img.axis('off')
+    finally:
+        plt.close(corner)
 
 
 class Plotter:
@@ -53,6 +84,8 @@ class Plotter:
         
         self.burnin = burnin
         self.thin   = thin
+        self.walk_plot_max_steps = 1000
+        self.walk_plot_max_walkers = 30
         
         return
     
@@ -184,42 +217,42 @@ class Plotter:
         n = len(names)
         axes = np.array(fig.axes).reshape((n, n))
 
-        for i in range(n):
-            for j in range(i+1,n):
-                ax = axes[j,i]
+        # for i in range(n):
+        #     for j in range(i+1,n):
+        #         ax = axes[j,i]
 
-                # if i == j:
-                #     continue
+        #         # if i == j:
+        #         #     continue
                 
-                # colname_dcor = f'dcor_{names[i]}{names[j]}'
-                colname_corr = f'rs_{names[i]}{names[j]}'
-                colname_pcor = f'p_rs_{names[i]}{names[j]}'
+        #         # colname_dcor = f'dcor_{names[i]}{names[j]}'
+        #         colname_corr = f'rs_{names[i]}{names[j]}'
+        #         colname_pcor = f'p_rs_{names[i]}{names[j]}'
                 
-                corr = df[colname_corr].item()
-                pcor = df[colname_pcor].item()
+        #         corr = df[colname_corr].item()
+        #         pcor = df[colname_pcor].item()
                 
-                star = ''
-                if pcor<0.05: 
-                    star = '*'
-                if pcor<0.01: 
-                    star = '**'
-                if pcor<0.001:
-                    star = '***'
+        #         star = ''
+        #         if pcor<0.05: 
+        #             star = '*'
+        #         if pcor<0.01: 
+        #             star = '**'
+        #         if pcor<0.001:
+        #             star = '***'
 
-                ax.text(
-                    pos[0], pos[1],
-                    fmt.format(corr) + star,
-                    transform=ax.transAxes,
-                    ha="left", va="top",
-                    fontsize=9,
-                    bbox=dict(
-                        boxstyle="round,pad=0.2",
-                        facecolor="white",
-                        alpha=0.65,
-                        edgecolor="none",
-                    ),
-                    zorder=100,
-                )
+        #         ax.text(
+        #             pos[0], pos[1],
+        #             fmt.format(corr) + star,
+        #             transform=ax.transAxes,
+        #             ha="left", va="top",
+        #             fontsize=9,
+        #             bbox=dict(
+        #                 boxstyle="round,pad=0.2",
+        #                 facecolor="white",
+        #                 alpha=0.65,
+        #                 edgecolor="none",
+        #             ),
+        #             zorder=100,
+        #         )
 
         return fig
 
@@ -317,13 +350,7 @@ class Plotter:
 
         # truths (dict OK)
         truth_emcee = {p: float(np.ravel(self.df[p].values)[0]) for p in names}
-        truth_resam = {
-            p: float(np.nanmedian(np.asarray(sort_outliers(resampled[:, i])).ravel()))
-            for i, p in enumerate(names)
-        }
-
         c.add_truth(Truth(location=truth_emcee, name="emcee", linestyle=":"))
-        # c.add_truth(Truth(location=truth_resam, name="resampled median", linestyle="--"))
 
         fig = c.plotter.plot(figsize=(10,10))
         # self._annotate_spearman_on_chainconsumer_corner(fig, df, self.names_param)
@@ -372,6 +399,8 @@ class Plotter:
         if self.gmodel  is None: return
         
         raw = self.sampler.get_chain(discard=0,thin=1)
+        raw, plot_steps = select_walk_plot_samples(
+            raw, self.walk_plot_max_steps, self.walk_plot_max_walkers)
         nstep_eff,nwalker,ndim = raw.shape
         demap = map_params(raw.reshape(-1,ndim),self.gmodel, mode='u->x').reshape(nstep_eff,nwalker,ndim)
         del raw
@@ -383,8 +412,8 @@ class Plotter:
         V_names = [param for param in names if param[0]=='V']
         S_names = [param for param in names if param[0]=='S']
         
-        if logx: x = np.arange(1, nstep_eff+1)
-        else   : x = np.arange(nstep_eff)
+        if logx: x = plot_steps + 1
+        else   : x = plot_steps
         
         def _shared_ylim(param_names, *, pct=90.0):
             idxs = [names_to_i[p] for p in param_names]
@@ -512,9 +541,8 @@ class Plotter:
         ax.set_xlabel(r'$\mathrm{km \ s^{-1}}$')
         ax.scatter(self.x, residuals, s=3, color='tab:blue')
 
-        sigma_res = np.nanstd(residuals)        
-        sigma_eff = np.maximum(self.e_y, sigma_res)
-        chisq = np.sum((residuals/sigma_eff)**2)
+        # Use propagated channel uncertainties, without a residual-scatter floor.
+        chisq = np.sum((residuals / self.e_y)**2)
         dof   = len(self.y)-len(self.names_param)
         chisq_red = chisq/dof
         ax_Gres.text(0.99,0.99, r'$\chi^2_\mathrm{red}$='+f'{chisq_red:.1f}', va='top',ha='right', transform=ax_Gres.transAxes)
@@ -571,9 +599,14 @@ class Plotter:
                 else:
                     SS = self.resampled[i,iS]
                 
-                iF = idx(self.names_param,f'F{Gg}')
-                FF = self.resampled[i,iF]
-                AA = FF / (SS * 2.50662872463)
+                if f'A{Gg}' in self.names_param:
+                    iA = idx(self.names_param,f'A{Gg}')
+                    AA = self.resampled[i,iA]    
+                
+                if f'F{Gg}' in self.names_param:
+                    iF = idx(self.names_param,f'F{Gg}')
+                    FF = self.resampled[i,iF]
+                    AA = FF / (SS * 2.50662872463)
                 
                 # iA = idx(self.names_param,f'A{Gg}')
                 # AA = self.resampled[i,iA]
@@ -760,21 +793,6 @@ class Plotter:
         def dict_coord_to_subplot_coord(dict_coord):
             return [dict_coord['l'],dict_coord['b'],dict_coord['r']-dict_coord['l'],dict_coord['t']-dict_coord['b']]
         
-        def paste_image(fig, path_image, dict_coord):
-            if not os.path.exists(path_image):
-                return
-
-            # frontImage = Image.open(path_image)
-            # width_pix = int(dict_coord['r']-dict_coord['l'])
-            # heigt_pix = int(dict_coord['t']-dict_coord['b'])
-            # frontImage_red = frontImage.resize((width_pix,heigt_pix))
-            # background.paste(frontImage_red, [int(dict_coord['l']), int(bgheight-dict_coord['t'])], frontImage_red)
-            
-            ax_img = fig.add_axes(dict_coord_to_subplot_coord(dict_coord))
-            img = plt.imread(path_image)
-            ax_img.imshow(img)
-            ax_img.axis('off')
-        
         suffix = self.suffix if self.suffix!='' else '_'
         
 
@@ -942,22 +960,18 @@ class Plotter:
         #     if (np.isfinite(self.df[f'e+_A{G}1'].item())) :
         
         if self.sampler is not None and G>1:
-            if self.savename_corner_emcee.exists()==False:
-                try:
-                    self.makeplot_corner_emcee(savefig=True)
-                except IndexError:
-                    pass
-            if self.savename_corner_emcee.exists():
-                paste_image(fig, self.savename_corner_emcee, coord_corner_emcee)
+            try:
+                paste_corner_figure(fig, self.makeplot_corner_emcee(savefig=False),
+                                    dict_coord_to_subplot_coord(coord_corner_emcee))
+            except IndexError:
+                pass
         
         if self.resampled is not None and G>1:
-            if self.savename_corner_resample.exists()==False:
-                try:
-                    self.makeplot_corner_resample(savefig=True)
-                except IndexError:
-                    pass
-            if self.savename_corner_resample.exists():
-                paste_image(fig, self.savename_corner_resample, coord_corner_resample)
+            try:
+                paste_corner_figure(fig, self.makeplot_corner_resample(savefig=False),
+                                    dict_coord_to_subplot_coord(coord_corner_resample))
+            except IndexError:
+                pass
                         
         # if 'sn' in self.df_params:
         #     keys = ['sn/sb','An/At','log(sb-sn)']

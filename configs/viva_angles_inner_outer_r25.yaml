@@ -1,0 +1,32 @@
+# Queue angular wedges inside and outside the NEDLVS optical ellipse.
+# Ropt = Diam / 2 (arcsec); this catalog radius is not uniformly B-band R25.
+preset: viva-test
+# Input layout: <data_dir>/<galaxy>/cube.fits (and hermite.npy).
+data_dir: /home/mskim/workspace/research/data/VIVA/VIVA
+# null uses per-galaxy output; a path here overrides output_dir_name.
+output_dir: null
+# Results: <data_dir>/<galaxy>/NGFIT/<output_dir_name>/
+# Set null to write directly into NGFIT/.
+output_dir_name: HERMOM
+workers: 60
+progress: terminal
+overwrite: false
+
+fit:
+  correlation_diagnostics: false  # true: robust pairwise Spearman diagnostics.
+  intermediate_plots: false  # Keep final/error plots; skip intermediate atlases.
+  walk_plot_max_steps: 1000  # Display only; fitting samples are unchanged.
+  walk_plot_max_walkers: 30
+  mode: HERMOM
+  model: 2GFIT
+  resamples: 10000
+  guess_from_whole: true
+
+masks:
+  cleanup_after_run: true  # true: delete used masks after success; false: keep masks.
+  regions: [whole, angle]
+  catalog: /home/mskim/workspace/research/data/catalog/diameters_NEDLVS.csv
+  angle_radial_regions: [inner, outer]
+  multipliers: [0.2,0.4,0.6,0.8,1.0]
+  angles: {start: 0, stop: 360, step: 15}  # Equivalent to np.arange(0, 360, 15)
+  angle_widths: [60,90,120]

@@ -1,0 +1,44 @@
+# Example: whole fits followed by inner/outer angular fits.
+# From pipeline/:
+# python3 pipe_superprofile.py --config ../configs/example_ngfit_output.yaml
+preset: viva-test
+
+# Input: <data_dir>/<galaxy>/cube.fits and hermite.npy.
+data_dir: /home/mskim/workspace/research/data/VIVA/VIVA_test
+# Optional subset; omit to process all galaxies in data_dir.
+# galaxies: [VCC307]
+
+# Output: <data_dir>/<galaxy>/NGFIT/example_2GFIT_HERMOM_Ropt/
+# Choose a folder name to keep experiments separate. This name is literal;
+# changing fit settings does not automatically change it.
+output_dir_name: example_2GFIT_HERMOM_Ropt
+# null enables per-galaxy output. A path overrides output_dir_name and puts
+# all galaxies' results in that shared directory instead.
+output_dir: null
+# To write directly into each galaxy's NGFIT/, set output_dir_name: null.
+
+workers: 4
+progress: terminal  # Use file to write Plotfit_stat.csv instead.
+overwrite: false  # Reuse selections present in both local result tables.
+
+fit:
+  correlation_diagnostics: false  # true: robust pairwise Spearman diagnostics.
+  intermediate_plots: false  # Keep final/error plots; skip intermediate atlases.
+  walk_plot_max_steps: 1000  # Display only; fitting samples are unchanged.
+  walk_plot_max_walkers: 30
+  mode: HERMOM
+  model: 2GFIT
+  resamples: 5000
+  guess_from_whole: true
+
+masks:
+  cleanup_after_run: true  # true: delete used masks after success; false: keep masks.
+  # Each galaxy's angle fits start after its own whole fit is saved.
+  regions: [whole, angle]
+  # Ropt = NEDLVS Diam / 2; not uniformly B-band R25.
+  catalog: /home/mskim/workspace/research/data/catalog/diameters_NEDLVS.csv
+  angle_radial_regions: [inner, outer]
+  # Remove angle_radial_regions for wedges without an inner/outer cut.
+  multipliers: [1.0]
+  angles: {start: 0, stop: 360, step: 15}
+  angle_widths: [120]

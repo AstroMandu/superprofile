@@ -119,7 +119,9 @@ def _inv_logunif(x, loglow, logspn): return (np.log(x)-loglow)/logspn
 
 def map_params(params, gmodel, mode:Literal['x->u','u->x']):
     
-    params = np.asarray(params)
+    # Mixed-type DataFrame rows can yield object Series even for numeric fields.
+    # Numerical ufuncs and compiled likelihoods require a floating-point array.
+    params = np.asarray(params, dtype=np.float64)
     
     low = gmodel.low
     hih = gmodel.hih
@@ -155,9 +157,10 @@ def map_params(params, gmodel, mode:Literal['x->u','u->x']):
     elif 'S21' in names:
         iS21,iS22 = idx(names,['S21','S22'])
         S21    = params_x[:,iS21]
-        loglowS22 = np.log(S21+dv)
-        logspnS22 = np.log(hih[None,iS22])-loglowS22
-        params_mapped[:,iS22] = mapper_logunif(params[:,iS22],loglowS22,logspnS22)
+        # Uniform conditional broad width, preserving the ordered lower bound.
+        lowS22 = S21 + dv
+        spnS22 = hih[None,iS22] - lowS22
+        params_mapped[:,iS22] = mapper_linear(params[:,iS22], lowS22, spnS22)
     
     elif 'S31' in names:
         iS31,iS32,iS33 = idx(names,['S31','S32','S33'])
@@ -166,9 +169,9 @@ def map_params(params, gmodel, mode:Literal['x->u','u->x']):
         hihS31 = S32-dv
         spnS31 = hihS31-low[None,iS31]
         params_mapped[:,iS31] = mapper_linear(params[:,iS31], lowS31, spnS31)
-        loglowS33 = np.log(S32+dv)
-        logspnS33 = np.log(hih[None,iS33]) - loglowS33
-        params_mapped[:,iS33] = mapper_logunif(params[:,iS33], loglowS33, logspnS33)
+        lowS33 = S32 + dv
+        spnS33 = hih[None,iS33] - lowS33
+        params_mapped[:,iS33] = mapper_linear(params[:,iS33], lowS33, spnS33)
         
         # iF31,iF32,iF33 = idx(names,['F31','F32','F33'])
         # F32 = params_x[:,iF32]

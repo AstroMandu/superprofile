@@ -1,0 +1,27 @@
+# Wedges intersected with the inner R25 ellipse (not separate angle/inner stacks).
+preset: viva-test
+data_dir: /home/mskim/workspace/research/data/VIVA/VIVA_test
+workers: 2
+overwrite: false
+
+fit:
+  correlation_diagnostics: false  # true: robust pairwise Spearman diagnostics.
+  intermediate_plots: false  # Keep final/error plots; skip intermediate atlases.
+  walk_plot_max_steps: 1000  # Display only; fitting samples are unchanged.
+  walk_plot_max_walkers: 30
+  mode: HERMOM
+  model: 2GFIT
+  resamples: 5000
+  guess_from_whole: false
+
+masks:
+  cleanup_after_run: true  # true: delete used masks after success; false: keep masks.
+  regions: [angle]
+  # VCC307 PA is NaN in this table; legacy ellipse helper assumes 0 deg.
+  # Supply a suitable catalog PA before scientific analysis.
+  catalog: /home/mskim/workspace/research/data/catalog/cat_diameters.csv
+  radius_column: r25
+  angle_radial_region: inner
+  multipliers: [1.0]
+  angles: {start: 0, stop: 360, step: 15}  # Equivalent to np.arange(0, 360, 15)
+  angle_widths: [120]

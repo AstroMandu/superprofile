@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 from astropy.io import fits
 from astropy.stats import mad_std
+from astropy.wcs import WCS
 from natsort import natsorted
 from radio_beam.beam import Beam
 from routines_baygaudpi import gauss, read_ngfits
@@ -22,7 +23,7 @@ from spectral_cube.io.core import StokesWarning
 from tqdm import tqdm
 
 from .subroutines_shiftnstack import (argfind_nearest, shifter_gipsy,
-                                      shifter_roll)
+                                      shifter_roll, summed_flux_error, select_spatial_mask)
 
 # matplotlib.use('Agg')
 
@@ -32,7 +33,7 @@ warnings.simplefilter("ignore", StokesWarning)
 class ShiftnStack:
     
     def __init__(self, path_cube, path_classified, path_mask=None, bgsub=True, path_vf_secondary=None, correct_vf_secondary=False, 
-                 secondary_mode:Literal['MOM','HER','HERMOM']='MOM'):
+                 secondary_mode:Literal['MOM','HER','HERMOM']='MOM', mask_value=None):
         # secondary_mode: 'moment' -> path_vf_secondary is a FITS moment-1 map (existing behaviour)
         #                 'hermite' -> path_vf_secondary is a hermite.npy; vf from [5] and disp from [2]
         path_cube       = Path(path_cube)
@@ -49,7 +50,10 @@ class ShiftnStack:
         data_cube = fits.getdata(path_cube) #* (u.Jy/u.beam)
         if(len(data_cube.shape)>3): data_cube = data_cube[0,:,:,:]
         
-        spec_axis = (SpectralCube.read(path_cube)).with_spectral_unit(u.km/u.s, velocity_convention='optical').spectral_axis.value
+        wcs_cube = WCS(hedr_cube)
+        if wcs_cube.naxis == 4:
+            wcs_cube = wcs_cube.dropaxis(3)
+        spec_axis = SpectralCube(data=data_cube, wcs=wcs_cube).with_spectral_unit(u.km/u.s, velocity_convention='optical').spectral_axis.value
         chansep = np.diff(spec_axis)[0]
         
         self.hedr_cube = hedr_cube
@@ -101,6 +105,7 @@ class ShiftnStack:
             data_mask = fits.getdata(path_mask)
             if(len(data_mask.shape)>2):
                 data_mask = data_mask[0,:,:]
+            data_mask = select_spatial_mask(data_mask, mask_value)
             # data_cube = np.where(np.isfinite(np.broadcast_to(data_mask, data_cube.shape)), data_cube, np.nan)
         else:
             data_mask = np.ones((hedr_cube['NAXIS2'],hedr_cube['NAXIS1']))
@@ -165,7 +170,7 @@ class ShiftnStack:
     # ------------------------------------------------------------------
 
     def setup_logger(self, suffix: str = '', log_level: int = logging.INFO) -> None:
-        """Create log/<name_cube><suffix>_<timestamp>.log under the cube's parent directory.
+        """Create NGFIT/log/<name_cube><suffix>_<timestamp>.log under the cube's parent directory.
 
         Parameters
         ----------
@@ -179,7 +184,7 @@ class ShiftnStack:
         self.suffix = suffix
         self._log_pixel_records = []
 
-        log_dir = self.path_cube.parent / 'log'
+        log_dir = self.path_cube.parent / 'NGFIT' / 'log'
         log_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -377,7 +382,8 @@ class ShiftnStack:
         e_y = e_y * (u.Jy / u.beam)
  
         yy  =          yy.to(u.Jy / u.sr, equivalencies=u.beam_angular_area(self.beam)) * self.area_pixl
-        e_y = std_channel.to(u.Jy / u.sr, equivalencies=u.beam_angular_area(self.beam)) * self.area_pixl * np.sqrt(NN / self.pix_per_beam)
+        e_y = summed_flux_error(
+            std_channel.to_value(u.Jy / u.beam), NN, self.pix_per_beam.value) * u.Jy
         e_y[np.argwhere(e_y == 0)] = np.median(e_y)
  
         xx, yy, e_y = xx * np.abs(self.chansep), yy, e_y
@@ -409,6 +415,12 @@ class ShiftnStack:
             path_mask=self.path_mask,
             wo_unit=True,
         )
+        # The reader sees the shared IO file; enforce this job's chosen region
+        # before any BAYGAUD components enter the stack.
+        for coord in list(dict_data):
+            x, y = map(int, coord.split(','))
+            if not np.isfinite(data_mask[y, x]):
+                del dict_data[coord]
  
         if self.bgsub:
             for coord in dict_data.keys():
@@ -498,6 +510,17 @@ class ShiftnStack:
         return index_dict_stacked
  
     # ------------------------------------------------------------------
+    def secondary_pixel_mask(self):
+        """Spatial eligibility shared by stacking and ring filling-factor planning."""
+        dispersion = self.data_disp_secondary
+        if self.secondary_mode == 'MOM':
+            path = self.path_cube.parent / 'cube_mom2.fits'
+            dispersion = fits.getdata(path) / 1000. if path.exists() else None
+        valid = np.isfinite(self.data_vf_secondary)
+        if dispersion is not None:
+            valid &= np.isfinite(dispersion) & (dispersion >= self.chansep / 2.355 * 2)
+        return np.isfinite(self.data_mask) & valid
+
     def _stack_secondary(
         self, data_cube, data_mask, xx, yy, NN,
         shifter, index_centr, index_dict_stacked,
@@ -524,9 +547,7 @@ class ShiftnStack:
                 data_vf_secondary,
             )
  
-        valid_pixels = np.argwhere(
-            np.isfinite(data_mask) & np.isfinite(data_vf_secondary)
-        )
+        valid_pixels = np.argwhere(np.isfinite(data_mask) & self.secondary_pixel_mask())
         len_data      = len(valid_pixels)
         count         = 0
         last_reported = -1

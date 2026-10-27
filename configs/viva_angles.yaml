@@ -1,0 +1,29 @@
+# Edit this file, then run: python3.13 pipe_superprofile.py --config configs/viva_angles.yaml
+preset: viva-test
+data_dir: /home/mskim/workspace/research/data/VIVA/VIVA_test
+# null means use the normal automatically named output directory.
+output_dir: null
+galaxies: null  # Discover all galaxies under data_dir.
+workers: 30
+overwrite: true
+
+fit:
+  correlation_diagnostics: false  # true: robust pairwise Spearman diagnostics.
+  intermediate_plots: false  # Keep final/error plots; skip intermediate atlases.
+  walk_plot_max_steps: 1000  # Display only; fitting samples are unchanged.
+  walk_plot_max_walkers: 30
+  mode: HERMOM
+  model: 2GFIT
+  resamples: 5000
+  statistics: MEDIAN
+  initmod: 123
+  guess_from_whole: true
+
+masks:
+  cleanup_after_run: true  # true: delete used masks after success; false: keep masks.
+  regions: [angle]
+  # Legacy angular-mask centers come from the catalog below.
+  catalog: /home/mskim/workspace/research/data/catalog/cat_diameters.csv
+  radius_column: RHI  # Does not impose a radial cut on angular masks.
+  angles: {start: 0, stop: 360, step: 15}  # Equivalent to np.arange(0, 360, 15)
+  angle_widths: [120]

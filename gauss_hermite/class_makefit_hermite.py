@@ -20,6 +20,7 @@ import numpy as np
 import pandas as pd
 from astropy import units as u
 from astropy.io import fits
+from astropy.wcs import WCS
 from natsort import natsorted
 from scipy.optimize import minimize
 from spectral_cube import SpectralCube
@@ -104,7 +105,7 @@ def job(js):
         # res = minimize(cost, x0=guess, bounds=bounds, method='Nelder-Mead',tol=1e-100)
         res = minimize(cost, x0=guess, bounds=bounds, method='Nelder-Mead')
                 
-        #EVALUATION
+        # #EVALUATION
         if res.x[2]<dict_glob['disp_lower']:
             continue
         if res.x[0]/dict_glob['noise']<3:
@@ -360,7 +361,10 @@ def main(n_cores, path_cube, path_velo, path_disp, path_mask=None, vdisp_intrins
     if(len(data_disp.shape)>2):
         data_disp = np.squeeze(data_disp, axis=tuple(np.arange(len(data_disp.shape)-2)))
 
-    spec_axis = SpectralCube.read(path_cube).with_spectral_unit(u.m/u.s, velocity_convention='optical').spectral_axis
+    wcs_cube = WCS(hedr_cube)
+    if wcs_cube.naxis == 4:
+        wcs_cube = wcs_cube.dropaxis(3)
+    spec_axis = SpectralCube(data=data_cube, wcs=wcs_cube).with_spectral_unit(u.m/u.s, velocity_convention='optical').spectral_axis
     
     vdisp_channel   = np.abs(np.diff(spec_axis)[0])/2.355 * 2
     vdisp_lower     = np.sqrt((vdisp_intrinsic.to(u.m/u.s))**2 + vdisp_channel**2)
@@ -459,24 +463,26 @@ if __name__=='__main__':
 
     from natsort import natsorted
     
-    # paths_cube = [Path('/home/mskim/workspace/research/data/test/VCC1778/cube.fits')]
-    # paths_cube = [Path('/home/mskim/workspace/research/data/AVID_halfbeam/VCC169/cube.fits')]
+    # paths_cube = natsorted(glob.glob('/home/mskim/workspace/research/data/Rory/varywind3/RPfiles_NHI*17/*/cube.fits'))
+    # paths_cube = natsorted(glob.glob('/home/mskim/workspace/research/data/AVID/AVID_hann/*/cube.fits'))
+    # paths_cube = natsorted(glob.glob('/home/mskim/workspace/research/data/AVID/test_sofiassnr/VCC656_*/cube.fits'))
+    paths_cube = natsorted(glob.glob('/home/mskim/workspace/research/data/AVID/AVID_nattaper_hann/*/cube.fits'))
+    # paths_cube = natsorted(glob.glob('/home/mskim/workspace/research/data/MFS/MFS_*arcsec/*/cube.fits'))
+    # paths_cube = natsorted(glob.glob('/home/mskim/workspace/research/data/*/L*atVirgo/*/cube.fits'))
     
-    paths_cube = Path('/home/mskim/workspace/research/data/VIVA_REG').glob('*/cube.fits')
-    # paths_cube = Path('/home/mskim/workspace/research/data/Rory').glob('RPfiles_*mJybeam/snap12_RP00*/cube.fits')
-    # paths_cube = Path('/home/mskim/workspace/research/data/LITTLE_THINGS_halfbeam').glob('*/cube.fits')
     
     for path_cube in natsorted(list(paths_cube)):
+        
+        path_cube = Path(path_cube)
     
         wdir = path_cube.parent
         galname = wdir.name
         
-        if os.path.exists(wdir/'cube_mom1.fits')==False: 
-            print(f'[Hermite] {galname} pass')
-            continue
+        if not (wdir/'cube_mom1.fits').exists(): continue
+        # if (wdir/'hermite.npy').exists(): continue
         
         print(wdir.name)
-        main(50,
+        main(60,
                 wdir/'cube.fits',
                 path_velo=wdir/'cube_mom1.fits',
                 path_disp=wdir/'cube_mom2.fits',
